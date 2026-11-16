@@ -1,0 +1,21 @@
+preset1 initial status: 3 ERRORS
+preset1 initial pixels: {"width":780,"height":796,"sampled":88698,"nonBackground":44186,"ratio":0.4982,"distinctColorBuckets":76,"renderer":"WebKit WebGL"}
+preset1 after autofix status: VALID
+autofix log: pass 1 · E01 · gatehouse | pass 1 · E01 · block-2 | pass 2 · E02 · block-4
+toast: Auto-fix applied 3 patch(es) in 2 pass(es) — scene valid
+preset1 after pixels: {"width":780,"height":796,"sampled":88698,"nonBackground":43949,"ratio":0.4955,"distinctColorBuckets":58,"renderer":"WebKit WebGL"}
+scrub End -> tick 180/180 · 3.00s
+scrub -30 -> tick 150/180 · 2.50s
+play 1.2s -> tick 064/180 · 1.07s
+xray pixels: {"width":780,"height":796,"sampled":88698,"nonBackground":31072,"ratio":0.3503,"distinctColorBuckets":59,"renderer":"WebKit WebGL"}
+preset3 status: VALID
+preset3 editor status: ✓ 15 nodes · 11 solids · topo-sorted · lint 41.3 ms
+preset3 pixels: {"width":780,"height":796,"sampled":88698,"nonBackground":17360,"ratio":0.1957,"distinctColorBuckets":194,"renderer":"WebKit WebGL"}
+export file: playable-parkour-arena.html
+exported page frame label (after 1.5s): frame 051 / 180  t=0.85s
+exported page frame label: frame 107 / 180  t=1.78s
+exported page errors: []
+console errors: []
+page errors: []
+failed requests: []
+console warnings: []

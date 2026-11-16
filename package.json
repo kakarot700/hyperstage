@@ -1,0 +1,24 @@
+{
+  "name": "hyperstage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deterministic 3D scene, physics, and playable-world compiler built for AI coding agents.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.12.1",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint:scene": "pnpm --filter @hyperstage/cli exec tsx src/index.ts lint",
+    "skills:install": "node --conditions=source --import tsx packages/cli/src/index.ts skills install --target ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "turbo": "^2.5.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

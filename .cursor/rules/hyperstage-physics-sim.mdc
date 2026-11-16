@@ -1,0 +1,37 @@
+---
+description: "Tune mass, restitution, friction and ramp angles so HyperStage's deterministic 180-tick Rapier3D rollout stays stable (no E02_UNSTABLE_PHYSICS) while still producing the intended motion."
+globs: "**/*.scene.json,**/*.scene.tsx"
+alwaysApply: false
+---
+
+# HyperStage Physics Simulation
+
+The linter steps a deterministic Rapier3D world (`@dimforge/rapier3d-deterministic-compat`) at `dt = 1/60` for 180 ticks (3.0 s). Results are bit-identical across Node and browsers, so a scene that passes once passes everywhere.
+
+## What E02 checks
+
+- A `dynamic` body falls below `y = -15` (void).
+- A body intended to rest drifts more than 0.5 m before any **trigger**. Triggers are contact with a `ramp`, or contact with a body that was already triggered (collision chains propagate).
+- A non-sphere body tilts more than 45 degrees without `physics.allowTip: true`.
+
+## Tuning table
+
+| Goal | Setting |
+| --- | --- |
+| Stable stacks | Snap each block `onto` the one below; equal footprints or smaller on top; `mass` 1-5; `friction` 0.6-1.0; restitution 0. |
+| Rolling marbles | `sphere`, `mass` 0.3-1, `friction` 0.4-0.6, `restitution` <= 0.3; ramps 8-20 deg, `friction` 0.3-0.5. |
+| Collision chains (cradle) | spheres touching at 0.000 m, `restitution` 0.9-0.95, `friction` <= 0.1, equal masses. |
+| Dominoes | thin boxes (`[0.12, 1, 0.5]`), spacing 0.4-0.55 m, `friction` ~1.0 on dominoes and floor, `allowTip: true`. |
+| Heavy anchors | raise `mass` instead of `restitution`; never exceed `restitution` 1.0 for resting bodies. |
+
+## Ramp geometry
+
+- `ramp.size = [length, thickness, width]`, tilted about Z by `angleDeg`. Positive angles raise the +X end.
+- Above ~35 deg spheres slide instead of roll and leave ramps early; keep cascade ramps <= 20 deg.
+- Leave a gap wider than the marble's diameter between a ramp's low end and any bumper so it can drop to the next level.
+
+## Workflow
+
+1. `hyperstage_simulate_physics({ sceneJson, ticks: 180 })` and read `peakVelocities`: peaks > 25 m/s usually mean interpenetration explosions (fix E01 first).
+2. Inspect `finalTransforms` for bodies that left their supports.
+3. Re-run `hyperstage_compile_and_lint`; iterate until no E02 remains.
