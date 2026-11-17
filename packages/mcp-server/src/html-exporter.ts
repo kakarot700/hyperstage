@@ -317,7 +317,7 @@ export function exportSceneHtml(options: ExportSceneOptions): string {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="generator" content="HyperStage 1.0.0" />
+<meta name="generator" content="HyperStage 1.1.0" />
 <title>${escapeHtml(title)}</title>
 <style>
   :root { color-scheme: dark; }

@@ -1,6 +1,6 @@
 {
   "name": "@hyperstage/mcp-server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Model Context Protocol stdio server exposing the HyperStage compiler, linter, simulator, and HTML exporter.",
   "license": "MIT",
   "type": "module",

@@ -89,7 +89,7 @@ beforeAll(async () => {
     capabilities: {},
     clientInfo: { name: "hyperstage-test", version: "1.0.0" },
   });
-  expect(init.result?.serverInfo).toMatchObject({ name: "hyperstage", version: "1.0.0" });
+  expect(init.result?.serverInfo).toMatchObject({ name: "hyperstage", version: "1.1.0" });
   harness.notify("notifications/initialized");
 });
 

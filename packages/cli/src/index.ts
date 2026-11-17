@@ -9,7 +9,7 @@ import type { LintReport, SpatialDiagnostic } from "@hyperstage/spatial-linter";
 import { exportSceneHtml } from "@hyperstage/mcp-server/html-exporter";
 import { loadThreeSources } from "@hyperstage/mcp-server/three-sources";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 export const AGENT_TARGETS = ["hark", "openhands", "claude", "cursor"] as const;
 export type AgentTarget = (typeof AGENT_TARGETS)[number];
 

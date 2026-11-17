@@ -1,6 +1,15 @@
-# HyperStage v1.0.0
+# HyperStage
 
-A deterministic 3D scene, physics, and playable-world compiler built for AI coding agents.
+[![License: MIT](https://img.shields.io/badge/License-MIT-6366f1.svg)](LICENSE)
+[![CI](https://github.com/kakarot700/hyperstage/actions/workflows/ci.yml/badge.svg)](https://github.com/kakarot700/hyperstage/actions/workflows/ci.yml)
+[![MCP Compatible](https://img.shields.io/badge/MCP-compatible-22d3ee.svg)](https://modelcontextprotocol.io)
+[![Rapier3D WASM](https://img.shields.io/badge/physics-Rapier3D%20WASM-f59e0b.svg)](https://rapier.rs)
+
+A deterministic 3D scene, physics, and playable-world compiler built for AI coding agents. Agents write a typed SceneAST, HyperStage lints it for real spatial bugs (overlaps, unstable physics, blocked cameras, unreachable goals) and repairs them automatically.
+
+![HyperStage Studio — Spatial Auto-Fix](verification/preset1-after.png)
+
+![HyperStage Playable Parkour & A* NavMesh](verification/preset3.png)
 
 Agents describe worlds as a typed **SceneAST** (JSON or zero-DOM TSX), place objects **relationally** with `snapTo`, and get back a **spatial lint report** from four deterministic passes: interpenetration (E01), a 180-tick Rapier3D stability rollout (E02), camera occlusion (E03), and goal reachability (E04). Every diagnostic carries a suggested fix, and `autoFixScene` repairs E01–E04 in up to five passes.
 
@@ -16,7 +25,10 @@ hyperstage/
 
 ## Quick start
 
+Requires Node 22 (≥ 20 works) and pnpm 10 (`corepack enable` picks up the pinned version).
+
 ```bash
+git clone https://github.com/kakarot700/hyperstage.git && cd hyperstage
 pnpm install
 pnpm typecheck && pnpm test && pnpm build
 
@@ -29,7 +41,8 @@ node packages/cli/bin/hyperstage.js export castle.scene.json -o castle.html
 node packages/cli/bin/hyperstage.js skills install --target .
 
 # Studio
-pnpm --filter @hyperstage/studio dev        # or: build && preview --port 4173
+pnpm --filter @hyperstage/studio dev        # http://localhost:5173
+pnpm --filter @hyperstage/studio build && pnpm --filter @hyperstage/studio preview   # http://localhost:4173
 ```
 
 ## SceneAST
@@ -61,12 +74,12 @@ const scene = compileJsx(
 
 ## Spatial linter
 
-| Code | Pass | Rule | Auto-fix |
-| --- | --- | --- | --- |
-| `E01_INTERPENETRATION` | OBB SAT / sphere closest-point | penetration > 2 mm | translate the dynamic/child body along the MTV (keeps `snapTo`, adjusts `offset`) |
-| `E02_UNSTABLE_PHYSICS` | Rapier3D deterministic, dt 1/60, 180 ticks | y < −15, drift > 0.5 m before a ramp/collision trigger, tilt > 45° without `allowTip` | `snapTo` the nearest surface directly beneath, footprint supported |
-| `E03_CAMERA_OCCLUSION` | 5×5 ray grid vs AABBs | > 40% of rays blocked | elevate the camera until ≤ 40% blocked |
-| `E04_UNREACHABLE_GOAL` | 0.25 m voxel columns, 1.5 m clearance, A* with 0.5 m steps and 2.0 m gap jumps | no path | move goal to the closest reachable point |
+| Code | Pass (source) | Method | Rule | Auto-fix |
+| --- | --- | --- | --- | --- |
+| `E01_INTERPENETRATION` | `passOverlap` (`pass-overlap.ts`) | OBB SAT / sphere closest-point | penetration > 2 mm | translate the dynamic/child body along the MTV (keeps `snapTo`, adjusts `offset`) |
+| `E02_UNSTABLE_PHYSICS` | `passPhysics` (`pass-physics.ts`) | Rapier3D deterministic, dt 1/60, 180 ticks | y < −15, drift > 0.5 m before a ramp/collision trigger, tilt > 45° without `allowTip` | `snapTo` the nearest surface directly beneath, footprint supported |
+| `E03_CAMERA_OCCLUSION` | `passCamera` (`pass-camera.ts`) | 5×5 ray grid vs AABBs | > 40% of rays blocked | elevate the camera until ≤ 40% blocked |
+| `E04_UNREACHABLE_GOAL` | `passNavmesh` (`pass-navmesh.ts`) | 0.25 m voxel columns, 1.5 m clearance, A* with 0.5 m steps and 2.0 m gap jumps | no path | move goal to the closest reachable point |
 
 `lintScene` returns `{ valid, elapsedMs, diagnostics, frames (180 FrameSnapshots), navPath, telemetry }`. `elapsedMs` excludes the one-time Rapier WASM init (singleton in `rapier-loader.ts`).
 
@@ -84,8 +97,47 @@ Measured on the 2-CPU build sandbox (Node 22, warm process, median of 20 runs): 
 
 Every result is returned as both `content[0].text` (JSON) and `structuredContent`; domain errors (invalid JSON, schema issues, anchor cycles) come back as `isError: true`. The server never writes to stdout except JSON-RPC frames; logs go to stderr.
 
+Build first (`pnpm build`), then point your agent at the stdio entry point. Replace `/abs/path/hyperstage` with your clone's absolute path.
+
+**Claude Code** — one command:
+
+```bash
+claude mcp add hyperstage -- node /abs/path/hyperstage/packages/mcp-server/bin/hyperstage-mcp.js
+```
+
+or commit a project-scoped `.mcp.json`:
+
 ```json
-{ "mcpServers": { "hyperstage": { "command": "node", "args": ["/abs/path/hyperstage/packages/mcp-server/bin/hyperstage-mcp.js"] } } }
+{
+  "mcpServers": {
+    "hyperstage": {
+      "command": "node",
+      "args": ["/abs/path/hyperstage/packages/mcp-server/bin/hyperstage-mcp.js"]
+    }
+  }
+}
+```
+
+**OpenHands** — add to `config.toml`:
+
+```toml
+[mcp]
+stdio_servers = [
+  { name = "hyperstage", command = "node", args = ["/abs/path/hyperstage/packages/mcp-server/bin/hyperstage-mcp.js"] }
+]
+```
+
+**Cursor** — `.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` globally):
+
+```json
+{
+  "mcpServers": {
+    "hyperstage": {
+      "command": "node",
+      "args": ["/abs/path/hyperstage/packages/mcp-server/bin/hyperstage-mcp.js"]
+    }
+  }
+}
 ```
 
 ## Studio
@@ -100,7 +152,17 @@ Presets: 1 Broken Tower → Auto-Fixed Castle · 2 Rube Goldberg Marble Cascade 
 
 ## Verification
 
-`verification/` holds headless-Chromium (SwiftShader WebGL) screenshots of the production build and the log from `verification/verify-studio.mjs` (zero console errors, Auto-Fix, timeline scrub, Preset 3, export round-trip).
+```bash
+node verification/verify-studio.mjs
+```
+
+The script runs its own `vite build` of the studio, serves `vite preview` on port 4173, and drives it with headless Chromium (SwiftShader WebGL) at 1440×900 @2x: Preset 1 before and after **Auto-Fix**, timeline scrub and play, then Preset 3. It writes `verification/preset1-before.png`, `verification/preset1-after.png`, `verification/preset3.png` and `verification/verification-log.txt`, and exits non-zero on any console error, page error or failed assertion.
+
+Full green gate:
+
+```bash
+pnpm install && pnpm typecheck && pnpm test && pnpm build && node verification/verify-studio.mjs
+```
 
 ## License
 

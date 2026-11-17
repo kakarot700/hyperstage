@@ -1,17 +1,24 @@
-import type { AppliedFix, LintReport } from "@hyperstage/spatial-linter";
+import type { AppliedFix, LintReport, SpatialDiagnostic } from "@hyperstage/spatial-linter";
+import { SHORT_TITLE, diagnosticNodes, primaryMetric, secondaryMetrics } from "../lib/diagnostics";
 
 export interface DiagnosticsPaneProps {
   report: LintReport | null;
   busy: boolean;
   applied: AppliedFix[];
+  selectedId: string | null;
+  /** The diagnostic whose fix ghost is currently shown, or null. */
+  previewing: SpatialDiagnostic | null;
   onAutoFix: () => void;
-  onFocusNode: (nodeId: string) => void;
+  /** Node chip click: select the node and fly the camera to it. */
+  onFlyTo: (nodeId: string) => void;
+  /** Hover/focus on Preview Fix shows a ghost; leaving clears it (null). */
+  onPreviewFix: (diagnostic: SpatialDiagnostic | null) => void;
+  /** Applies only this diagnostic's suggested fix. */
+  onApplyFix: (diagnostic: SpatialDiagnostic) => void;
 }
 
-const fmt = (value: number): string => (Math.abs(value) >= 100 ? value.toFixed(0) : Math.abs(value) >= 1 ? value.toFixed(2) : value.toFixed(3));
-
 /** Compiler error cards, pass telemetry and the 1-click Auto-Fix trigger. */
-export function DiagnosticsPane({ report, busy, applied, onAutoFix, onFocusNode }: DiagnosticsPaneProps) {
+export function DiagnosticsPane({ report, busy, applied, selectedId, previewing, onAutoFix, onFlyTo, onPreviewFix, onApplyFix }: DiagnosticsPaneProps) {
   const errors = report?.diagnostics.filter((d) => d.severity === "error").length ?? 0;
   const fixable = report?.diagnostics.some((d) => d.suggestedFix !== undefined) ?? false;
   return (
@@ -30,32 +37,12 @@ export function DiagnosticsPane({ report, busy, applied, onAutoFix, onFocusNode 
       <div className="hs-diag-body">
         {report !== null && (
           <div className="hs-telemetry">
-            <div className="hs-metric">
-              <div className="hs-metric-label">lint</div>
-              <div className="hs-metric-value" data-testid="lint-ms">{report.elapsedMs.toFixed(1)}ms</div>
-            </div>
-            <div className="hs-metric">
-              <div className="hs-metric-label">rapier</div>
-              <div className="hs-metric-value">{report.telemetry.passMs.physics.toFixed(1)}ms</div>
-            </div>
-            <div className="hs-metric">
-              <div className="hs-metric-label">bodies</div>
-              <div className="hs-metric-value">
-                {report.telemetry.dynamicBodyCount}/{report.telemetry.geometryCount}
-              </div>
-            </div>
-            <div className="hs-metric">
-              <div className="hs-metric-label">E01 sat</div>
-              <div className="hs-metric-value">{report.telemetry.passMs.overlap.toFixed(2)}</div>
-            </div>
-            <div className="hs-metric">
-              <div className="hs-metric-label">E03 rays</div>
-              <div className="hs-metric-value">{report.telemetry.passMs.camera.toFixed(2)}</div>
-            </div>
-            <div className="hs-metric">
-              <div className="hs-metric-label">E04 a*</div>
-              <div className="hs-metric-value">{report.telemetry.passMs.navmesh.toFixed(2)}</div>
-            </div>
+            <Metric label="lint" value={`${report.elapsedMs.toFixed(1)}ms`} testId="lint-ms" />
+            <Metric label="rapier" value={`${report.telemetry.passMs.physics.toFixed(1)}ms`} />
+            <Metric label="bodies" value={`${report.telemetry.dynamicBodyCount}/${report.telemetry.geometryCount}`} />
+            <Metric label="E01 sat" value={`${report.telemetry.passMs.overlap.toFixed(2)}ms`} />
+            <Metric label="E03 rays" value={`${report.telemetry.passMs.camera.toFixed(2)}ms`} />
+            <Metric label="E04 a*" value={`${report.telemetry.passMs.navmesh.toFixed(2)}ms`} />
           </div>
         )}
 
@@ -69,33 +56,79 @@ export function DiagnosticsPane({ report, busy, applied, onAutoFix, onFocusNode 
           {busy ? "Repairing…" : "Auto-Fix Spatial Errors"}
         </button>
 
-        {report !== null && report.diagnostics.length === 0 && (
-          <div className="hs-empty">✓ 0 spatial errors · 180-tick rollout stable</div>
-        )}
+        {report !== null && report.diagnostics.length === 0 && <div className="hs-empty">✓ 0 spatial errors · {report.frames.length}-tick rollout stable</div>}
 
-        {report?.diagnostics.map((d, i) => (
-          <article
-            key={`${d.code}-${d.nodeId}-${i}`}
-            className="hs-card"
-            data-severity={d.severity}
-            onClick={() => onFocusNode(d.nodeId)}
-          >
-            <div className="hs-card-code">{d.code}</div>
-            <div className="hs-card-title">{d.message}</div>
-            <div className="hs-card-metrics">
-              {Object.entries(d.metrics).map(([key, value]) => (
-                <span key={key} className="hs-badge">
-                  {key} {fmt(value)}
+        {report?.diagnostics.map((d, i) => {
+          const metric = primaryMetric(d);
+          const extra = secondaryMetrics(d);
+          const isPreviewing = previewing === d;
+          return (
+            <article key={`${d.code}-${d.nodeId}-${i}`} className="hs-card" data-severity={d.severity} data-testid="diagnostic-card">
+              <div className="hs-card-head">
+                <span className="hs-sev" data-severity={d.severity}>
+                  {d.code.slice(0, 3)}
                 </span>
-              ))}
-            </div>
-            {d.suggestedFix !== undefined && (
-              <div className="hs-card-fix">
-                <b>fix</b> {d.suggestedFix.rationale}
+                <span className="hs-card-name">{SHORT_TITLE[d.code]}</span>
+                <span className="hs-spacer" />
+                <span className="hs-card-code">{d.severity.toUpperCase()}</span>
               </div>
-            )}
-          </article>
-        ))}
+              {metric !== null && (
+                <div className="hs-card-metric" data-testid="diagnostic-metric">
+                  <span className="hs-card-metric-label">{metric.label}:</span>
+                  <span className="hs-card-metric-value">{metric.value}</span>
+                </div>
+              )}
+              <div className="hs-card-title">{d.message}</div>
+              <div className="hs-chips">
+                {diagnosticNodes(d).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className="hs-chip"
+                    aria-pressed={id === selectedId}
+                    onClick={() => onFlyTo(id)}
+                    title={`Fly camera to ${id}`}
+                    data-testid={`chip-${id}`}
+                  >
+                    <span className="hs-chip-dot" />
+                    {id}
+                  </button>
+                ))}
+              </div>
+              {extra.length > 0 && (
+                <div className="hs-card-metrics">
+                  {extra.map((x) => (
+                    <span key={x.label} className="hs-badge">
+                      {x.label} {x.value}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {d.suggestedFix !== undefined && (
+                <div className="hs-card-fix">
+                  <span>
+                    <b>fix</b> {d.suggestedFix.rationale}
+                  </span>
+                  <button
+                    type="button"
+                    className="hs-btn hs-btn-sm hs-preview-btn"
+                    data-previewing={isPreviewing}
+                    disabled={busy}
+                    onMouseEnter={() => onPreviewFix(d)}
+                    onMouseLeave={() => onPreviewFix(null)}
+                    onFocus={() => onPreviewFix(d)}
+                    onBlur={() => onPreviewFix(null)}
+                    onClick={() => onApplyFix(d)}
+                    title="Hover to preview the ghost · click to apply this fix"
+                    data-testid="preview-fix"
+                  >
+                    ◇ Preview Fix
+                  </button>
+                </div>
+              )}
+            </article>
+          );
+        })}
 
         {applied.length > 0 && (
           <div className="hs-card">
@@ -109,5 +142,16 @@ export function DiagnosticsPane({ report, busy, applied, onAutoFix, onFocusNode 
         )}
       </div>
     </aside>
+  );
+}
+
+function Metric({ label, value, testId }: { label: string; value: string; testId?: string }) {
+  return (
+    <div className="hs-metric">
+      <div className="hs-metric-label">{label}</div>
+      <div className="hs-metric-value" data-testid={testId}>
+        {value}
+      </div>
+    </div>
   );
 }

@@ -40,7 +40,7 @@ async function guard(run: () => Promise<Record<string, unknown>> | Record<string
 const sceneJson = z.string().min(2).describe("SceneAST serialized as JSON ({ name, gravity, skyColor, nodes })");
 
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "hyperstage", version: "1.0.0" });
+  const server = new McpServer({ name: "hyperstage", version: "1.1.0" });
 
   server.registerTool(
     "hyperstage_compile_and_lint",
