@@ -8,7 +8,9 @@ const scene = (name: string, nodes: SceneNode[]): SceneAST => ({ name, gravity: 
 const ground: SceneNode = { id: "ground", kind: "box", size: [20, 0.5, 20], position: [0, -0.25, 0] };
 const codes = (report: LintReport): DiagnosticCode[] => report.diagnostics.map((d) => d.code);
 
-const fixtures: Record<DiagnosticCode, SceneAST> = {
+type V1Code = Exclude<DiagnosticCode, "E05_BROKEN_JOINT">;
+
+const fixtures: Record<V1Code, SceneAST> = {
   E01_INTERPENETRATION: scene("e01", [
     ground,
     { id: "crate-a", kind: "box", size: [1, 1, 1], position: [0, 0.5, 0], physics: { body: "dynamic" } },
@@ -37,7 +39,7 @@ beforeAll(async () => {
 });
 
 describe("spatial linter passes", () => {
-  for (const code of Object.keys(fixtures) as DiagnosticCode[]) {
+  for (const code of Object.keys(fixtures) as V1Code[]) {
     it(`${code} triggers on the broken fixture and passes after autoFixScene`, async () => {
       const fixture = fixtures[code];
       const before = await lintScene(fixture);

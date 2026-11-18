@@ -23,6 +23,8 @@ export function primaryMetric(d: SpatialDiagnostic): MetricReadout | null {
     case "E04_UNREACHABLE_GOAL":
       if (x.distanceToGoal !== undefined) return { label: "gap", value: m(x.distanceToGoal) };
       return x.navCells !== undefined ? { label: "nav cells", value: String(x.navCells) } : null;
+    case "E05_BROKEN_JOINT":
+      return x.maxSeparation !== undefined ? { label: "anchor gap", value: m(x.maxSeparation) } : null;
   }
 }
 
@@ -33,6 +35,7 @@ export function secondaryMetrics(d: SpatialDiagnostic): MetricReadout[] {
     E02_UNSTABLE_PHYSICS: [],
     E03_CAMERA_OCCLUSION: ["occlusionRatio"],
     E04_UNREACHABLE_GOAL: ["distanceToGoal"],
+    E05_BROKEN_JOINT: ["maxSeparation"],
   };
   const skip = new Set(headline[d.code]);
   return Object.entries(d.metrics)
@@ -55,4 +58,5 @@ export const SHORT_TITLE: Record<SpatialDiagnostic["code"], string> = {
   E02_UNSTABLE_PHYSICS: "Unstable physics",
   E03_CAMERA_OCCLUSION: "Camera occlusion",
   E04_UNREACHABLE_GOAL: "Unreachable goal",
+  E05_BROKEN_JOINT: "Broken joint",
 };

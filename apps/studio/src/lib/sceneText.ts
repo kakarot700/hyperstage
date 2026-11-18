@@ -1,17 +1,35 @@
 import { SceneValidationError, parseScene } from "@hyperstage/core";
 import type { SceneAST } from "@hyperstage/core";
 
-/** One node per line keeps the DSL compact and makes per-node error markers precise. */
+/**
+ * One node per line keeps the DSL compact and makes per-node error markers precise.
+ * Every other top-level field (joints, triggers, ...) is kept, arrays one entry per line,
+ * so a scene round-trips through the editor without losing data.
+ */
 export function formatScene(scene: SceneAST): string {
-  const head = `  "name": ${JSON.stringify(scene.name)},\n  "gravity": ${JSON.stringify(scene.gravity)},\n  "skyColor": ${JSON.stringify(scene.skyColor)},\n`;
-  const nodes = scene.nodes
-    .map((n) => {
-      // Canonical key order: kind and id first, then the remaining fields as authored.
-      const { kind, id, ...rest } = n;
-      return `    ${JSON.stringify({ kind, id, ...rest })}`;
-    })
-    .join(",\n");
-  return `{\n${head}  "nodes": [\n${nodes}\n  ]\n}\n`;
+  const { name, gravity, skyColor, nodes, ...extra } = scene;
+  const parts: string[] = [
+    `  "name": ${JSON.stringify(name)}`,
+    `  "gravity": ${JSON.stringify(gravity)}`,
+    `  "skyColor": ${JSON.stringify(skyColor)}`,
+  ];
+  const nodeLines = nodes.map((n) => {
+    // Canonical key order: kind and id first, then the remaining fields as authored.
+    const { kind, id, ...rest } = n;
+    return `    ${JSON.stringify({ kind, id, ...rest })}`;
+  });
+  parts.push(`  "nodes": [\n${nodeLines.join(",\n")}\n  ]`);
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      if (value.length === 0) continue;
+      const lines = value.map((entry) => `    ${JSON.stringify(entry)}`);
+      parts.push(`  ${JSON.stringify(key)}: [\n${lines.join(",\n")}\n  ]`);
+    } else {
+      parts.push(`  ${JSON.stringify(key)}: ${JSON.stringify(value)}`);
+    }
+  }
+  return `{\n${parts.join(",\n")}\n}\n`;
 }
 
 /** 1-based line of the node whose `"id"` equals `nodeId`, or null when it is not in the text. */

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PRESETS } from "@hyperstage/core";
+import { PRESETS, parseGlb } from "@hyperstage/core";
 
 interface JsonRpcMessage {
   jsonrpc: string;
@@ -89,7 +89,7 @@ beforeAll(async () => {
     capabilities: {},
     clientInfo: { name: "hyperstage-test", version: "1.0.0" },
   });
-  expect(init.result?.serverInfo).toMatchObject({ name: "hyperstage", version: "1.1.0" });
+  expect(init.result?.serverInfo).toMatchObject({ name: "hyperstage", version: "2.0.0" });
   harness.notify("notifications/initialized");
 });
 
@@ -98,17 +98,59 @@ afterAll(() => {
 });
 
 describe("hyperstage MCP server over stdio", () => {
-  it("lists exactly the 5 tools with input schemas", async () => {
+  it("lists exactly the 7 tools with input schemas", async () => {
     const response = await harness.request("tools/list", {});
-    const tools = (response.result?.tools ?? []) as { name: string; inputSchema: { properties: Record<string, unknown> } }[];
+    const tools = (response.result?.tools ?? []) as { name: string; inputSchema: { properties?: Record<string, unknown> } }[];
     expect(tools.map((t) => t.name).sort()).toEqual([
       "hyperstage_compile_and_lint",
+      "hyperstage_export_cad",
       "hyperstage_export_html",
+      "hyperstage_get_examples",
       "hyperstage_inspect_bounds",
       "hyperstage_simulate_physics",
       "hyperstage_test_playability",
     ]);
-    for (const tool of tools) expect(tool.inputSchema.properties.sceneJson).toBeDefined();
+    for (const tool of tools) {
+      if (tool.name === "hyperstage_get_examples") expect(tool.inputSchema.properties?.category).toBeDefined();
+      else expect(tool.inputSchema.properties?.sceneJson).toBeDefined();
+    }
+  });
+
+  it("hyperstage_export_cad returns a parseable binary glb and a binary stl", async () => {
+    const glb = await harness.callTool("hyperstage_export_cad", { sceneJson: parkourJson, format: "glb" });
+    expect(glb.isError).toBeFalsy();
+    const g = glb.structuredContent as { format: string; mimeType: string; data: string; bytes: number; triangles: number };
+    expect(g.format).toBe("glb");
+    expect(g.mimeType).toBe("model/gltf-binary");
+    const glbBytes = new Uint8Array(Buffer.from(g.data, "base64"));
+    expect(glbBytes.length).toBe(g.bytes);
+    expect((parseGlb(glbBytes).json as { asset: { version: string } }).asset.version).toBe("2.0");
+    expect(g.triangles).toBeGreaterThan(0);
+
+    const stl = await harness.callTool("hyperstage_export_cad", { sceneJson: parkourJson, format: "stl" });
+    const st = stl.structuredContent as { data: string; bytes: number; triangles: number };
+    const stlBytes = Buffer.from(st.data, "base64");
+    expect(stlBytes.length).toBe(84 + 50 * st.triangles);
+    expect(stlBytes.readUInt32LE(80)).toBe(st.triangles);
+  });
+
+  it("hyperstage_get_examples filters by category and every example lints clean", async () => {
+    const all = await harness.callTool("hyperstage_get_examples", {});
+    const everything = all.structuredContent as { count: number; examples: { id: string; category: string; scene: unknown }[] };
+    expect(everything.count).toBe(everything.examples.length);
+    for (const category of ["game", "robotics", "architecture", "cad"]) {
+      expect(everything.examples.some((e) => e.category === category)).toBe(true);
+    }
+    const robotics = await harness.callTool("hyperstage_get_examples", { category: "robotics" });
+    const filtered = robotics.structuredContent as { category: string; examples: { category: string; scene: unknown }[] };
+    expect(filtered.category).toBe("robotics");
+    expect(filtered.examples.every((e) => e.category === "robotics")).toBe(true);
+    for (const example of everything.examples) {
+      if (example.id.includes("broken-tower")) continue;
+      const lint = await harness.callTool("hyperstage_compile_and_lint", { sceneJson: JSON.stringify(example.scene) });
+      const summary = (lint.structuredContent as { summary: { valid: boolean } }).summary;
+      expect(summary.valid).toBe(true);
+    }
   });
 
   it("hyperstage_compile_and_lint returns summary + diagnostics as content and structuredContent", async () => {
@@ -153,6 +195,8 @@ describe("hyperstage MCP server over stdio", () => {
     expect(structured.html).toContain('id="hs-three-core"');
     expect(structured.html).toContain("OrbitControls");
     expect(structured.html).toContain("KeyW");
+    expect(structured.html).toContain("Built with HyperStage");
+    expect(structured.html).toContain("https://github.com/kakarot700/hyperstage");
     expect(structured.html).not.toMatch(/<script[^>]+src=/);
   });
 

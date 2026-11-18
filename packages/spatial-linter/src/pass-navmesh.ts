@@ -1,5 +1,6 @@
 import { add, dot, quatAxes, round6, roundVec, scale } from "@hyperstage/core";
 import type { GoalNode, ResolvedGeometry, ResolvedScene, SpawnNode, Vec3 } from "@hyperstage/core";
+import { meshColumnSpans, meshProxyOf, segmentAabb, segmentMesh } from "./geometry.js";
 import type { SpatialDiagnostic } from "./types.js";
 
 export const NAV_CELL_M = 0.25;
@@ -7,6 +8,8 @@ export const NAV_CLEARANCE_M = 1.5;
 export const NAV_STEP_M = 0.5;
 export const NAV_JUMP_M = 2.0;
 export const NAV_MAX_DROP_M = 4.0;
+/** Height above the take-off surface that must stay clear along a gap jump. */
+export const JUMP_TORSO_M = 0.9;
 const MAX_LAYERS = 8;
 const MAX_CELLS_PER_AXIS = 480;
 const WALKABLE_COS = Math.cos((50 * Math.PI) / 180);
@@ -161,6 +164,17 @@ export function computeNavigation(resolved: ResolvedScene, spawn: SpawnNode, goa
   // Rasterise every body into per-column vertical spans.
   const spans: Span[][] = Array.from({ length: nx * nz }, () => []);
   geometry.forEach((g, owner) => {
+    const mesh = meshProxyOf(g);
+    if (mesh !== null) {
+      // Closed capsule/torus/CSG meshes: every solid interval of the column is a span, so a
+      // doorway leaves only the lintel overhead and the floor beneath stays walkable.
+      for (const [key, list] of meshColumnSpans(mesh, minX, minZ, cell, nx, nz)) {
+        for (const span of list) {
+          spans[key]?.push({ top: span.top, bottom: span.bottom, walkable: span.topNormalY >= WALKABLE_COS, owner });
+        }
+      }
+      return;
+    }
     const ix0 = Math.max(0, Math.floor((g.min[0] - minX) / cell));
     const ix1 = Math.min(nx - 1, Math.floor((g.max[0] - minX) / cell));
     const iz0 = Math.max(0, Math.floor((g.min[2] - minZ) / cell));
@@ -180,7 +194,7 @@ export function computeNavigation(resolved: ResolvedScene, spawn: SpawnNode, goa
       if (!s.walkable) continue;
       let clear = true;
       for (const o of list) {
-        if (o.owner === s.owner) continue;
+        if (o === s) continue;
         if (o.bottom < s.top + NAV_CLEARANCE_M && o.top > s.top + 0.02) {
           clear = false;
           break;
@@ -268,6 +282,19 @@ export function computeNavigation(resolved: ResolvedScene, spawn: SpawnNode, goa
     }
   };
 
+  // A jump is blocked when a solid crosses the torso-height line between take-off and landing.
+  const jumpBlocked = (from: Vec3, to: Vec3): boolean => {
+    const delta: Vec3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    for (const g of geometry) {
+      const boxT = segmentAabb(from, delta, add(g.min, [1e-4, 1e-4, 1e-4]), add(g.max, [-1e-4, -1e-4, -1e-4]));
+      if (boxT === null) continue;
+      const mesh = meshProxyOf(g);
+      const t = mesh === null ? boxT : segmentMesh(from, delta, mesh);
+      if (t !== null && t < 1) return true;
+    }
+    return false;
+  };
+
   while (open.size > 0) {
     const current = open.pop();
     if (current === undefined) break;
@@ -314,7 +341,7 @@ export function computeNavigation(resolved: ResolvedScene, spawn: SpawnNode, goa
         let landed = false;
         heights.forEach((h2, layer) => {
           const rise = h2 - h;
-          if (Math.abs(rise) <= NAV_STEP_M) {
+          if (Math.abs(rise) <= NAV_STEP_M && !jumpBlocked([cp[0], h + JUMP_TORSO_M, cp[2]], [cellX(jx), Math.max(h, h2) + JUMP_TORSO_M, cellZ(jz)])) {
             landed = true;
             relax(current, encode(jx, jz, layer), Math.hypot(dx * k, dz * k) * cell * 1.5 + Math.abs(rise));
           }

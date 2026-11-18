@@ -8,6 +8,7 @@ export const MAX_FIX_PASSES = 5;
 export interface AppliedFix {
   pass: number;
   code: DiagnosticCode;
+  /** Patched node id, or the joint id for E05 anchor repairs. */
   nodeId: string;
   rationale: string;
 }
@@ -23,6 +24,7 @@ export interface AutoFixResult {
 
 const PRIORITY: DiagnosticCode[] = [
   "E01_INTERPENETRATION",
+  "E05_BROKEN_JOINT",
   "E02_UNSTABLE_PHYSICS",
   "E03_CAMERA_OCCLUSION",
   "E04_UNREACHABLE_GOAL",
@@ -51,12 +53,23 @@ export async function autoFixScene(input: SceneAST | unknown, options: LintOptio
   const applied: AppliedFix[] = [];
   let passes = 0;
   while (!report.valid && passes < MAX_FIX_PASSES) {
-    const fixable = report.diagnostics.filter((d) => d.suggestedFix !== undefined);
+    const fixable = report.diagnostics.filter((d) => d.suggestedFix !== undefined || d.suggestedJointFix !== undefined);
     const code = PRIORITY.find((c) => fixable.some((d) => d.code === c));
     if (code === undefined) break;
     passes++;
     const patched = new Set<string>();
     const nodes = [...scene.nodes];
+    const joints = [...(scene.joints ?? [])];
+    for (const diagnostic of fixable) {
+      const jointFix = diagnostic.suggestedJointFix;
+      if (diagnostic.code !== code || jointFix === undefined || patched.has(jointFix.jointId)) continue;
+      const index = joints.findIndex((j) => j.id === jointFix.jointId);
+      const joint = joints[index];
+      if (joint === undefined) continue;
+      joints[index] = { ...joint, ...jointFix.patch };
+      patched.add(jointFix.jointId);
+      applied.push({ pass: passes, code, nodeId: jointFix.jointId, rationale: jointFix.rationale });
+    }
     for (const diagnostic of fixable) {
       const fix = diagnostic.suggestedFix;
       if (diagnostic.code !== code || fix === undefined || patched.has(fix.nodeId)) continue;
@@ -67,7 +80,7 @@ export async function autoFixScene(input: SceneAST | unknown, options: LintOptio
       patched.add(fix.nodeId);
       applied.push({ pass: passes, code, nodeId: fix.nodeId, rationale: fix.rationale });
     }
-    scene = parseScene({ ...scene, nodes });
+    scene = parseScene(scene.joints === undefined ? { ...scene, nodes } : { ...scene, nodes, joints });
     report = await lintScene(scene, options);
   }
   return { scene, report, initialReport, passes, applied };

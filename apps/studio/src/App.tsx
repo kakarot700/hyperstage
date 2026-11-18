@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnchorCycleError, AnchorTargetError, PRESETS, SceneValidationError, parseScene, resolveScene } from "@hyperstage/core";
+import { AnchorCycleError, AnchorTargetError, PRESETS, SceneValidationError, exportGlb, exportStl, parseScene, resolveScene } from "@hyperstage/core";
 import type { ResolvedScene, SceneAST } from "@hyperstage/core";
 import { autoFixScene, lintScene } from "@hyperstage/spatial-linter";
 import type { AppliedFix, AutoFixResult, LintReport, SpatialDiagnostic } from "@hyperstage/spatial-linter";
@@ -21,7 +21,7 @@ import { detectCollisionEvents } from "./lib/timeline";
 
 export { formatScene };
 
-export const STUDIO_VERSION = "1.1.0";
+export const STUDIO_VERSION = "2.0.0";
 
 interface Compiled {
   scene: SceneAST;
@@ -198,7 +198,7 @@ export function App() {
         setError(null);
         setFrame(0);
         setTransitionKey((k) => k + 1);
-        setToast(`Applied ${diagnostic.code.slice(0, 3)} fix to ${diagnostic.suggestedFix?.nodeId ?? diagnostic.nodeId}`);
+        setToast(`Applied ${diagnostic.code.slice(0, 3)} fix to ${diagnostic.suggestedFix?.nodeId ?? diagnostic.suggestedJointFix?.jointId ?? diagnostic.nodeId}`);
       } catch (e) {
         setToast(`Fix could not be applied — ${e instanceof Error ? e.message : String(e)}`);
       } finally {
@@ -208,20 +208,36 @@ export function App() {
     [compiled],
   );
 
-  const onExport = useCallback(async () => {
-    if (compiled === null) return;
-    const three = await loadThreeSources();
-    const html = exportSceneHtml({ scene: compiled.scene, frames: compiled.report.frames, navPath: compiled.report.navPath, title: compiled.scene.name, three });
-    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${compiled.scene.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "scene"}.html`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-    setToast(`Exported ${(html.length / 1024).toFixed(0)} KiB standalone HTML`);
-  }, [compiled]);
+  const onExport = useCallback(
+    async (format: "html" | "glb" | "stl" = "html") => {
+      if (compiled === null) return;
+      const slug = compiled.scene.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "scene";
+      let blob: Blob;
+      let summary: string;
+      if (format === "html") {
+        const three = await loadThreeSources();
+        const html = exportSceneHtml({ scene: compiled.scene, frames: compiled.report.frames, navPath: compiled.report.navPath, title: compiled.scene.name, three });
+        blob = new Blob([html], { type: "text/html" });
+        summary = `${(html.length / 1024).toFixed(0)} KiB standalone HTML`;
+      } else {
+        const result = format === "glb" ? exportGlb(compiled.scene) : exportStl(compiled.scene);
+        const bytes = new Uint8Array(result.bytes.length);
+        bytes.set(result.bytes);
+        blob = new Blob([bytes.buffer], { type: format === "glb" ? "model/gltf-binary" : "model/stl" });
+        summary = `${(result.bytes.length / 1024).toFixed(0)} KiB .${format} (${result.stats.triangles} triangles)`;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${slug}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      setToast(`Exported ${summary}`);
+    },
+    [compiled],
+  );
 
   const requestCamera = useCallback((command: CameraCommand) => {
     setCameraRequest({ command, nonce: ++nonce.current });
@@ -282,7 +298,7 @@ export function App() {
   const report = compiled?.report ?? null;
   const hasSpawn = compiled?.scene.nodes.some((n) => n.kind === "spawn") ?? false;
   const frameCount = report?.frames.length ?? 0;
-  const fixable = report?.diagnostics.some((d) => d.suggestedFix !== undefined) ?? false;
+  const fixable = report?.diagnostics.some((d) => d.suggestedFix !== undefined || d.suggestedJointFix !== undefined) ?? false;
   const mod = isMacPlatform() ? "⌘" : "Ctrl";
 
   const commands: Command[] = useMemo(() => {
@@ -306,7 +322,9 @@ export function App() {
       { id: "cam-top", title: "Top orthographic camera", group: "Camera", keys: [], disabled: walkMode, run: () => requestCamera("top") },
       { id: "cam-iso", title: "Isometric camera", group: "Camera", keys: [], disabled: walkMode, run: () => requestCamera("iso") },
       { id: "cam-reset", title: "Reset camera", group: "Camera", keys: ["R"], disabled: walkMode, run: () => requestCamera("reset") },
-      { id: "export", title: "Export standalone .html", group: "File", keys: [], disabled: compiled === null, run: () => void onExport() },
+      { id: "export", title: "Export standalone .html", group: "File", keys: [], disabled: compiled === null, run: () => void onExport("html") },
+      { id: "export-glb", title: "Export binary glTF (.glb)", group: "File", keys: [], disabled: compiled === null, run: () => void onExport("glb") },
+      { id: "export-stl", title: "Export 3D-print .stl", group: "File", keys: [], disabled: compiled === null, run: () => void onExport("stl") },
       { id: "ai", title: "AI Generate scene (BYOK)", group: "File", keys: [], run: () => setByokOpen(true) },
     );
     if (hasSpawn) {
@@ -378,9 +396,17 @@ export function App() {
         <button type="button" className="hs-btn hs-btn-ghost hs-palette-trigger" onClick={() => setPaletteOpen(true)} data-testid="open-palette">
           Commands <Keycaps keys={[mod, "K"]} />
         </button>
-        <button type="button" className="hs-btn" onClick={() => void onExport()} disabled={compiled === null} data-testid="export">
-          ⤓ Export .html
-        </button>
+        <div className="hs-export-group" role="group" aria-label="Export">
+          <button type="button" className="hs-btn" onClick={() => void onExport("html")} disabled={compiled === null} data-testid="export">
+            ⤓ .html
+          </button>
+          <button type="button" className="hs-btn" onClick={() => void onExport("glb")} disabled={compiled === null} data-testid="export-glb">
+            .glb
+          </button>
+          <button type="button" className="hs-btn" onClick={() => void onExport("stl")} disabled={compiled === null} data-testid="export-stl">
+            .stl
+          </button>
+        </div>
         <button type="button" className="hs-btn hs-btn-primary" onClick={() => setByokOpen(true)}>
           ✦ AI Generate
         </button>

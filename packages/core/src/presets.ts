@@ -1,3 +1,4 @@
+import { csgVilla, motorizedRover, planetaryGearset } from "./presets-v2.js";
 import type { SceneAST, SceneNode, Vec3 } from "./schema.js";
 
 export interface ScenePreset {
@@ -6,6 +7,8 @@ export interface ScenePreset {
   title: string;
   description: string;
   playable: boolean;
+  /** v2: showcase category used by `hyperstage_get_examples` (game, robotics, architecture, cad). */
+  category?: "game" | "robotics" | "architecture" | "cad";
   scene: SceneAST;
 }
 
@@ -285,6 +288,10 @@ function cradleAndDominoes(): SceneAST {
   };
 }
 
+/**
+ * The 6 v2 showcase presets (Studio tabs 1-6, `hyperstage init --preset 1..6`).
+ * Presets 2, 4 and 6 are new in v2; 1, 3 and 5 keep their v1 scenes.
+ */
 export const PRESETS: ScenePreset[] = [
   {
     id: "broken-tower",
@@ -292,15 +299,17 @@ export const PRESETS: ScenePreset[] = [
     title: "Broken Tower -> Auto-Fixed Castle",
     description: "Loads with 3 deliberate spatial bugs (2x E01, 1x E02). Auto-Fix snaps every block into place.",
     playable: false,
+    category: "architecture",
     scene: brokenTower(),
   },
   {
-    id: "marble-cascade",
+    id: "motorized-rover",
     index: 2,
-    title: "Rube Goldberg Marble Cascade",
-    description: "Multi-ramp dynamic sphere chain reaction.",
+    title: "Motorized Rover & Drawbridge",
+    description: "Revolute wheel motors drive a rover onto a pressure plate whose enable_motor trigger lowers a hinged drawbridge.",
     playable: false,
-    scene: marbleCascade(),
+    category: "robotics",
+    scene: motorizedRover(),
   },
   {
     id: "parkour-arena",
@@ -308,26 +317,73 @@ export const PRESETS: ScenePreset[] = [
     title: "Playable Parkour Arena",
     description: "WASD + Space character controller with a glowing navPath from spawn to goal.",
     playable: true,
+    category: "game",
     scene: parkourArena(),
   },
   {
-    id: "arch-interior",
+    id: "csg-villa",
     index: 4,
+    title: "CSG Villa",
+    description: "Walls carved by CSG subtract (doorway + windows) with frosted glass; the navigator walks in through the doorway.",
+    playable: true,
+    category: "architecture",
+    scene: csgVilla(),
+  },
+  {
+    id: "rube-goldberg-cascade",
+    index: 5,
+    title: "Rube Goldberg Cascade",
+    description: "Zig-zag ramps feed a marble chain reaction down four levels.",
+    playable: false,
+    category: "game",
+    scene: marbleCascade(),
+  },
+  {
+    id: "planetary-gearset",
+    index: 6,
+    title: "3D-Printable Planetary Gearset",
+    description: "Millimetre-scale CSG sun, planets, carrier and ring with 0.6 mm print-in-place clearance; exports watertight .stl.",
+    playable: false,
+    category: "cad",
+    scene: planetaryGearset(),
+  },
+];
+
+/** v1 presets kept addressable by id for backward compatibility (`getPreset("arch-interior")`). */
+export const LEGACY_PRESETS: ScenePreset[] = [
+  {
+    id: "marble-cascade",
+    index: 102,
+    title: "Rube Goldberg Marble Cascade",
+    description: "Multi-ramp dynamic sphere chain reaction (v1 id of preset 5).",
+    playable: false,
+    category: "game",
+    scene: marbleCascade(),
+  },
+  {
+    id: "arch-interior",
+    index: 104,
     title: "Precision Arch Interior",
     description: "Relational snapTo room, desk, monitor and lamps with 0.000 m contact tolerance.",
     playable: false,
+    category: "architecture",
     scene: archInterior(),
   },
   {
     id: "cradle-dominoes",
-    index: 5,
+    index: 105,
     title: "Newton's Cradle & Dominoes",
     description: "High-restitution rigid-body collision chain.",
     playable: false,
+    category: "game",
     scene: cradleAndDominoes(),
   },
 ];
 
+/** Looks a preset up by its 1-based index or id (v2 presets first, then v1 legacy ids). */
 export function getPreset(idOrIndex: string | number): ScenePreset | undefined {
-  return PRESETS.find((p) => p.id === idOrIndex || p.index === Number(idOrIndex));
+  return (
+    PRESETS.find((p) => p.id === idOrIndex || p.index === Number(idOrIndex)) ??
+    LEGACY_PRESETS.find((p) => p.id === idOrIndex)
+  );
 }

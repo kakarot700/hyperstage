@@ -1,6 +1,6 @@
 {
   "name": "@hyperstage/spatial-linter",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Deterministic 4-pass spatial linter (E01-E04) with Rapier3D rollouts and auto-fixer.",
   "license": "MIT",
   "type": "module",

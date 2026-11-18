@@ -1,0 +1,458 @@
+{
+  "summary": {
+    "tasks": 10,
+    "contactToleranceMm": 1,
+    "baselinePassRate": 0,
+    "hyperstagePassRate": 1,
+    "baselineMedianErrorMm": 75,
+    "hyperstageMedianErrorMm": 0,
+    "hyperstageMaxErrorMm": 0,
+    "medianCompileMs": 0.209,
+    "medianLintMs": 3.34,
+    "compileBudgetMs": 20,
+    "node": "v22.23.5",
+    "generatedAt": "2026-11-18T07:54:54.222Z"
+  },
+  "results": [
+    {
+      "id": "crate-stack",
+      "title": "Stack three crates on a pallet",
+      "baseline": {
+        "pass": false,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 75,
+        "measurements": [
+          {
+            "label": "pallet on ground.top",
+            "errorMm": 75
+          },
+          {
+            "label": "crate-1 on pallet.top",
+            "errorMm": 75
+          },
+          {
+            "label": "crate-2 on crate-1.top",
+            "errorMm": 0
+          },
+          {
+            "label": "crate-3 on crate-2.top",
+            "errorMm": 0
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "pallet on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "crate-1 on pallet.top",
+            "errorMm": 0
+          },
+          {
+            "label": "crate-2 on crate-1.top",
+            "errorMm": 0
+          },
+          {
+            "label": "crate-3 on crate-2.top",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 0,
+        "patches": 0
+      },
+      "compileMedianMs": 0.251,
+      "lintMedianMs": 14.02
+    },
+    {
+      "id": "desk-monitor",
+      "title": "Monitor on a desk, keyboard in front",
+      "baseline": {
+        "pass": false,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 15,
+        "measurements": [
+          {
+            "label": "desk on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "monitor on desk.top",
+            "errorMm": 0
+          },
+          {
+            "label": "keyboard on desk.top",
+            "errorMm": 15
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "desk on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "monitor on desk.top",
+            "errorMm": 0
+          },
+          {
+            "label": "keyboard on desk.top",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 0,
+        "patches": 0
+      },
+      "compileMedianMs": 0.226,
+      "lintMedianMs": 7.67
+    },
+    {
+      "id": "wall-frame",
+      "title": "Picture frame flush on a wall",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E01_INTERPENETRATION"
+        ],
+        "maxErrorMm": 20,
+        "measurements": [
+          {
+            "label": "wall on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "frame on wall.south",
+            "errorMm": 20
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "wall on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "frame on wall.south",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 0,
+        "patches": 0
+      },
+      "compileMedianMs": 0.108,
+      "lintMedianMs": 1.37
+    },
+    {
+      "id": "ceiling-lamp",
+      "title": "Pendant lamp hanging under a ceiling",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E01_INTERPENETRATION"
+        ],
+        "maxErrorMm": 400,
+        "measurements": [
+          {
+            "label": "ceiling on post.top",
+            "errorMm": 0
+          },
+          {
+            "label": "lamp on ceiling.bottom",
+            "errorMm": 400
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "ceiling on post.top",
+            "errorMm": 0
+          },
+          {
+            "label": "lamp on ceiling.bottom",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 0,
+        "patches": 0
+      },
+      "compileMedianMs": 0.201,
+      "lintMedianMs": 2.24
+    },
+    {
+      "id": "shelf-books",
+      "title": "Books standing on a wall shelf",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E01_INTERPENETRATION"
+        ],
+        "maxErrorMm": 20,
+        "measurements": [
+          {
+            "label": "shelf on wall.south",
+            "errorMm": 0
+          },
+          {
+            "label": "book-1 on shelf.top",
+            "errorMm": 0
+          },
+          {
+            "label": "book-2 on shelf.top",
+            "errorMm": 20
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "shelf on wall.south",
+            "errorMm": 0
+          },
+          {
+            "label": "book-1 on shelf.top",
+            "errorMm": 0
+          },
+          {
+            "label": "book-2 on shelf.top",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 0,
+        "patches": 0
+      },
+      "compileMedianMs": 0.199,
+      "lintMedianMs": 3.49
+    },
+    {
+      "id": "door-hinge",
+      "title": "Hinged door on a door frame (revolute joint)",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E05_BROKEN_JOINT"
+        ],
+        "maxErrorMm": 452.769,
+        "measurements": [
+          {
+            "label": "frame on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "joint hinge",
+            "errorMm": 452.769
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "frame on ground.top",
+            "errorMm": 0
+          },
+          {
+            "label": "joint hinge",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 1,
+        "patches": 1
+      },
+      "compileMedianMs": 0.217,
+      "lintMedianMs": 3.19
+    },
+    {
+      "id": "rover-axles",
+      "title": "Rover wheels on motorised axles",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E05_BROKEN_JOINT"
+        ],
+        "maxErrorMm": 300,
+        "measurements": [
+          {
+            "label": "joint axle-l",
+            "errorMm": 0
+          },
+          {
+            "label": "joint axle-r",
+            "errorMm": 300
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "joint axle-l",
+            "errorMm": 0
+          },
+          {
+            "label": "joint axle-r",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 1,
+        "patches": 1
+      },
+      "compileMedianMs": 0.225,
+      "lintMedianMs": 8.61
+    },
+    {
+      "id": "camera-statue",
+      "title": "Hero camera framing a statue behind a hedge",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E03_CAMERA_OCCLUSION"
+        ],
+        "maxErrorMm": null,
+        "measurements": [
+          {
+            "label": "camera occlusion",
+            "errorMm": null
+          },
+          {
+            "label": "statue on ground.top",
+            "errorMm": 0
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "camera occlusion",
+            "errorMm": 0
+          },
+          {
+            "label": "statue on ground.top",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 1,
+        "patches": 1
+      },
+      "compileMedianMs": 0.095,
+      "lintMedianMs": 1.35
+    },
+    {
+      "id": "parkour-gap",
+      "title": "Spawn-to-goal route across platforms",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E04_UNREACHABLE_GOAL"
+        ],
+        "maxErrorMm": null,
+        "measurements": [
+          {
+            "label": "goal reachable",
+            "errorMm": null
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "goal reachable",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 1,
+        "patches": 1
+      },
+      "compileMedianMs": 0.197,
+      "lintMedianMs": 2.96
+    },
+    {
+      "id": "csg-doorway",
+      "title": "Walk through a CSG doorway into a room",
+      "baseline": {
+        "pass": false,
+        "lintValid": false,
+        "diagnostics": [
+          "E04_UNREACHABLE_GOAL"
+        ],
+        "maxErrorMm": null,
+        "measurements": [
+          {
+            "label": "goal reachable",
+            "errorMm": null
+          },
+          {
+            "label": "wall on floor.top",
+            "errorMm": 0
+          }
+        ]
+      },
+      "hyperstage": {
+        "pass": true,
+        "lintValid": true,
+        "diagnostics": [],
+        "maxErrorMm": 0,
+        "measurements": [
+          {
+            "label": "goal reachable",
+            "errorMm": 0
+          },
+          {
+            "label": "wall on floor.top",
+            "errorMm": 0
+          }
+        ],
+        "fixPasses": 0,
+        "patches": 0
+      },
+      "compileMedianMs": 0.224,
+      "lintMedianMs": 5.3
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { add, bodyKindOf, roundVec, scale } from "@hyperstage/core";
 import type { ResolvedGeometry, ResolvedScene, SceneNodeBase, Vec3 } from "@hyperstage/core";
-import { contact, shapeOf } from "./geometry.js";
+import { contact, lintMeshOf, meshContact, meshProxyOf, shapeOf } from "./geometry.js";
 import type { SpatialDiagnostic } from "./types.js";
 
 /** Flush contacts within 2 mm are legal. */
@@ -26,6 +26,12 @@ export function translatePatch(mover: ResolvedGeometry, delta: Vec3): Partial<Sc
 
 /** Pass 1 (E01_INTERPENETRATION): pairwise SAT / closest-point penetration with an MTV repair. */
 export function passOverlap(resolved: ResolvedScene): SpatialDiagnostic[] {
+  // Bodies connected by a joint have contacts disabled in the rollout; their overlap is by design.
+  const jointed = new Set<string>();
+  for (const joint of resolved.scene.joints ?? []) {
+    jointed.add(`${joint.bodyA}\u0000${joint.bodyB}`);
+    jointed.add(`${joint.bodyB}\u0000${joint.bodyA}`);
+  }
   const diagnostics: SpatialDiagnostic[] = [];
   const geometry = resolved.geometry;
   const shapes = geometry.map((g) => shapeOf(g));
@@ -45,7 +51,23 @@ export function passOverlap(resolved: ResolvedScene): SpatialDiagnostic[] {
       ) {
         continue;
       }
-      const hit = contact(shapeA, shapeB);
+      if (jointed.has(`${a.id}\u0000${b.id}`)) continue;
+      // Translating along the axis of least AABB overlap separates the boxes (and so the solids),
+      // so the true penetration depth can never exceed it: flush contacts skip the narrow phase.
+      const aabbOverlap = Math.min(
+        Math.min(a.max[0], b.max[0]) - Math.max(a.min[0], b.min[0]),
+        Math.min(a.max[1], b.max[1]) - Math.max(a.min[1], b.min[1]),
+        Math.min(a.max[2], b.max[2]) - Math.max(a.min[2], b.min[2]),
+      );
+      if (aabbOverlap <= OVERLAP_TOLERANCE_M) continue;
+      // Narrow phase: exact sphere/OBB proxies for v1 kinds, real triangles for closed
+      // capsule/torus/CSG meshes (so carved doorways and windows are respected).
+      const meshA = meshProxyOf(a);
+      const meshB = meshProxyOf(b);
+      const hit =
+        meshA === null && meshB === null
+          ? contact(shapeA, shapeB)
+          : meshContact(meshA ?? lintMeshOf(a), meshB ?? lintMeshOf(b), contact(shapeA, shapeB).normal);
       if (hit.depth <= OVERLAP_TOLERANCE_M) continue;
       const mover = chooseMover(a, b);
       const other = mover === a ? b : a;

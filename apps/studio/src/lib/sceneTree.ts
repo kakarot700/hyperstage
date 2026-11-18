@@ -54,7 +54,7 @@ export function buildSceneTree(scene: SceneAST, report: LintReport | null): Tree
     rows.push({
       id: node.id,
       kind: node.kind,
-      icon: node.kind,
+      icon: iconFor(node.kind),
       depth,
       snapTarget: snap?.target ?? null,
       snapFace: snap?.face ?? null,
@@ -70,12 +70,21 @@ export function buildSceneTree(scene: SceneAST, report: LintReport | null): Tree
   return rows;
 }
 
+/** v2 solids without a dedicated glyph use the box icon. */
+function iconFor(kind: SceneNode["kind"]): TreeIcon {
+  return kind === "capsule" || kind === "torus" || kind === "gltf" || kind === "csg" ? "box" : kind;
+}
+
 function rank(node: SceneNode): number {
   switch (node.kind) {
     case "box":
     case "sphere":
     case "cylinder":
     case "ramp":
+    case "capsule":
+    case "torus":
+    case "gltf":
+    case "csg":
       return 0;
     case "spawn":
     case "goal":

@@ -17,6 +17,16 @@ export function applyNodePatch(node: SceneNode, patch: Patch): SceneNode {
 
 /** Returns a new scene with one diagnostic's suggested fix applied, or null when it has none. */
 export function applySuggestedFix(scene: SceneAST, diagnostic: SpatialDiagnostic): SceneAST | null {
+  const jointFix = diagnostic.suggestedJointFix;
+  if (jointFix !== undefined) {
+    const joints = scene.joints ?? [];
+    const index = joints.findIndex((j) => j.id === jointFix.jointId);
+    const joint = joints[index];
+    if (joint === undefined) return null;
+    const next = [...joints];
+    next[index] = { ...joint, ...jointFix.patch };
+    return parseScene({ ...scene, joints: next });
+  }
   const fix = diagnostic.suggestedFix;
   if (fix === undefined) return null;
   const index = scene.nodes.findIndex((n) => n.id === fix.nodeId);

@@ -1490,3 +1490,13 @@ code,
 .hs-gutter-pad {
   height: 48px;
 }
+
+/* v2: grouped export buttons (.html / .glb / .stl) */
+.hs-export-group {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.hs-export-group .hs-btn {
+  padding-inline: 10px;
+}

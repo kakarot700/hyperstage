@@ -9,7 +9,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { getRapier } from "@hyperstage/spatial-linter";
 import { loadThreeSources } from "./three-sources.js";
-import { compileAndLint, exportHtml, inspectBounds, simulatePhysics, testPlayability } from "./tools.js";
+import { EXAMPLE_CATEGORIES } from "./examples.js";
+import { CAD_FORMATS, compileAndLint, exportCad, exportHtml, getExamples, inspectBounds, simulatePhysics, testPlayability } from "./tools.js";
 
 const log = (...args: unknown[]): void => {
   console.error("[hyperstage-mcp]", ...args);
@@ -37,10 +38,12 @@ async function guard(run: () => Promise<Record<string, unknown>> | Record<string
   }
 }
 
+export const SERVER_VERSION = "2.0.0";
+
 const sceneJson = z.string().min(2).describe("SceneAST serialized as JSON ({ name, gravity, skyColor, nodes })");
 
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "hyperstage", version: "1.1.0" });
+  const server = new McpServer({ name: "hyperstage", version: SERVER_VERSION });
 
   server.registerTool(
     "hyperstage_compile_and_lint",
@@ -94,6 +97,28 @@ export function createServer(): McpServer {
     async (args) => guard(() => exportHtml(args.sceneJson, loadThreeSources(), args.title)),
   );
 
+  server.registerTool(
+    "hyperstage_export_cad",
+    {
+      title: "Export CAD (.glb / .stl)",
+      description:
+        "Meshes every geometry node (all 8 kinds, CSG included) and returns a base64-encoded binary glTF 2.0 .glb (Y-up, metres, PBR materials) or a binary .stl (Z-up, millimetres, ready for slicers), plus triangle count and bounding dimensions in millimetres.",
+      inputSchema: { sceneJson, format: z.enum(CAD_FORMATS).describe('"glb" for engines/viewers, "stl" for 3D printing') },
+    },
+    async (args) => guard(() => exportCad(args.sceneJson, args.format)),
+  );
+
+  server.registerTool(
+    "hyperstage_get_examples",
+    {
+      title: "Get canonical scene examples",
+      description:
+        "Returns verified SceneAST templates (every built-in preset plus hand-written references: game spawn/goal course, robotics motor + hinge joints, architecture CSG doorway, CAD CSG bracket). Copy their syntax instead of guessing it.",
+      inputSchema: { category: z.enum(EXAMPLE_CATEGORIES).optional().describe("Filter to one category; omit for all") },
+    },
+    async (args) => guard(() => getExamples(args.category)),
+  );
+
   return server;
 }
 
@@ -101,7 +126,7 @@ async function main(): Promise<void> {
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  log("ready on stdio (5 tools)");
+  log("ready on stdio (7 tools)");
   // Warm the deterministic Rapier WASM in the background so the first lint is fast.
   getRapier().catch((error: unknown) => log("rapier init failed:", error instanceof Error ? error.message : String(error)));
 }

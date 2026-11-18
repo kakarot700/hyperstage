@@ -6,7 +6,7 @@ alwaysApply: false
 
 # HyperStage Spatial Debugging
 
-Always fix in priority order: **E01 -> E02 -> E03 -> E04**. Interpenetration corrupts the physics rollout, and physics changes what the camera and navigator see.
+Always fix in priority order: **E01 -> E05 -> E02 -> E03 -> E04**. Interpenetration corrupts the physics rollout, and physics changes what the camera and navigator see.
 
 ## 1. Gather facts
 - `hyperstage_compile_and_lint` -> list of diagnostics with `metrics` and `suggestedFix`.
@@ -21,6 +21,11 @@ Always fix in priority order: **E01 -> E02 -> E03 -> E04**. Interpenetration cor
 - `maxTiltDeg` > 45: center the body over its support, widen the base, or set `allowTip: true` if toppling is intended (dominoes).
 - `minY` < -15: it fell off the world. Add a floor or snap it onto one.
 - Bodies riding on an unstable anchor are not reported separately; fixing the anchor fixes them.
+
+## 3b. E05_BROKEN_JOINT
+- A joint's world anchors are more than 0.15 m apart in the rest pose or during the rollout (`initialSeparation`, `maxSeparation`, `maxSeparationTick`).
+- `suggestedJointFix.patch.anchorB` is the body-local anchor that coincides with `anchorA`; apply it to the joint (not to a node). The auto-fixer does this for you.
+- If the rest pose is fine but the joint pulls apart later, lower `motorMaxForce` or add limits.
 
 ## 4. E03_CAMERA_OCCLUSION
 - More than 40% of the 5x5 rays to the subject are blocked by `relatedNodeId`.

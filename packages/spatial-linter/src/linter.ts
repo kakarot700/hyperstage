@@ -3,7 +3,8 @@ import type { ResolvedScene, SceneAST } from "@hyperstage/core";
 import { passCamera } from "./pass-camera.js";
 import { passNavmesh } from "./pass-navmesh.js";
 import { passOverlap } from "./pass-overlap.js";
-import { DEFAULT_TICKS, passPhysics, rollout } from "./pass-physics.js";
+import { DEFAULT_TICKS, passJoints, passPhysics, rollout } from "./pass-physics.js";
+import { meshFallbackNotes } from "./geometry.js";
 import type { RolloutResult } from "./pass-physics.js";
 import { getRapier } from "./rapier-loader.js";
 import type { LintOptions, LintReport, SpatialDiagnostic } from "./types.js";
@@ -12,7 +13,7 @@ const now = (): number => performance.now();
 const ms = (value: number): number => Number(value.toFixed(3));
 
 /**
- * Runs the four deterministic passes (E01 overlap, E02 physics rollout,
+ * Runs the deterministic passes (E01 overlap, E02 physics rollout, E05 joints,
  * E03 camera occlusion, E04 navigation) and returns a LintReport with telemetry.
  * `elapsedMs` excludes the one-time Rapier WASM initialisation.
  */
@@ -26,14 +27,14 @@ export async function lintScene(input: SceneAST | unknown, options: LintOptions 
   const overlap = passOverlap(resolved);
   const t2 = now();
   const physicsRun: RolloutResult = rollout(rapier, scene, resolved, ticks);
-  const physics = passPhysics(resolved, physicsRun);
+  const physics = [...passPhysics(resolved, physicsRun), ...passJoints(scene, resolved, physicsRun)];
   const t3 = now();
   const camera = passCamera(resolved);
   const t4 = now();
   const nav = passNavmesh(resolved);
   const t5 = now();
   const diagnostics: SpatialDiagnostic[] = [...overlap, ...physics, ...camera, ...nav.diagnostics];
-  return {
+  const report: LintReport = {
     valid: !diagnostics.some((d) => d.severity === "error"),
     elapsedMs: ms(t5 - t0),
     diagnostics,
@@ -48,6 +49,13 @@ export async function lintScene(input: SceneAST | unknown, options: LintOptions 
       navCells: nav.cells,
     },
   };
+  if ((scene.triggers ?? []).length > 0) {
+    report.triggerEvents = physicsRun.triggerEvents;
+    report.unlockedGoals = physicsRun.unlockedGoals;
+  }
+  const notes = meshFallbackNotes(resolved.geometry);
+  if (notes.length > 0) report.notes = notes;
+  return report;
 }
 
 export interface SimulationResult {

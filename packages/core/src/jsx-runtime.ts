@@ -6,7 +6,13 @@
 import type {
   BoxNode,
   CameraNode,
+  CapsuleNode,
+  CsgNode,
   CylinderNode,
+  GltfNode,
+  JointSpec,
+  TorusNode,
+  TriggerSpec,
   GoalNode,
   LightNode,
   RampNode,
@@ -33,6 +39,8 @@ export interface SceneProps {
   name: string;
   gravity?: Vec3;
   skyColor?: string;
+  joints?: JointSpec[];
+  triggers?: TriggerSpec[];
   children?: HyperChild;
 }
 
@@ -80,7 +88,7 @@ export function jsx(
 
 export const jsxs = jsx;
 
-const NODE_KINDS = new Set(["box", "sphere", "cylinder", "ramp", "camera", "light", "spawn", "goal"]);
+const NODE_KINDS = new Set(["box", "sphere", "cylinder", "ramp", "capsule", "torus", "gltf", "csg", "camera", "light", "spawn", "goal"]);
 
 function collectNodes(element: HyperElement, out: unknown[]): void {
   if (element.type === Fragment || element.type === "group") {
@@ -104,6 +112,8 @@ export function compileJsx(root: HyperElement): SceneAST {
     gravity: root.props.gravity ?? [0, -9.81, 0],
     skyColor: root.props.skyColor ?? "#08090A",
     nodes: nodes as SceneNode[],
+    ...(root.props.joints === undefined ? {} : { joints: root.props.joints }),
+    ...(root.props.triggers === undefined ? {} : { triggers: root.props.triggers }),
   });
 }
 
@@ -122,6 +132,10 @@ export declare namespace JSX {
     sphere: WithChildren<SphereNode>;
     cylinder: WithChildren<CylinderNode>;
     ramp: WithChildren<RampNode>;
+    capsule: WithChildren<CapsuleNode>;
+    torus: WithChildren<TorusNode>;
+    gltf: WithChildren<GltfNode>;
+    csg: WithChildren<CsgNode>;
     camera: WithChildren<CameraNode>;
     light: WithChildren<LightNode>;
     spawn: WithChildren<SpawnNode>;

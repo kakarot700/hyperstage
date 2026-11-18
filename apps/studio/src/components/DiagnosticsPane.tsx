@@ -20,7 +20,7 @@ export interface DiagnosticsPaneProps {
 /** Compiler error cards, pass telemetry and the 1-click Auto-Fix trigger. */
 export function DiagnosticsPane({ report, busy, applied, selectedId, previewing, onAutoFix, onFlyTo, onPreviewFix, onApplyFix }: DiagnosticsPaneProps) {
   const errors = report?.diagnostics.filter((d) => d.severity === "error").length ?? 0;
-  const fixable = report?.diagnostics.some((d) => d.suggestedFix !== undefined) ?? false;
+  const fixable = report?.diagnostics.some((d) => d.suggestedFix !== undefined || d.suggestedJointFix !== undefined) ?? false;
   return (
     <aside className="hs-pane" aria-label="Diagnostics">
       <div className="hs-pane-head">
@@ -104,10 +104,10 @@ export function DiagnosticsPane({ report, busy, applied, selectedId, previewing,
                   ))}
                 </div>
               )}
-              {d.suggestedFix !== undefined && (
+              {(d.suggestedFix ?? d.suggestedJointFix) !== undefined && (
                 <div className="hs-card-fix">
                   <span>
-                    <b>fix</b> {d.suggestedFix.rationale}
+                    <b>fix</b> {(d.suggestedFix ?? d.suggestedJointFix)?.rationale}
                   </span>
                   <button
                     type="button"

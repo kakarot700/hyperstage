@@ -16,9 +16,21 @@ describe("formatScene", () => {
     expect(parseScene(JSON.parse(text))).toEqual(parseScene(scene));
   });
 
+  it("keeps joints and triggers for every preset (v2 mechanisms survive the editor)", () => {
+    for (let index = 1; index <= 6; index++) {
+      const scene = preset(index);
+      expect(parseScene(JSON.parse(formatScene(scene)))).toEqual(parseScene(scene));
+    }
+    const rover = parseScene(JSON.parse(formatScene(preset(2))));
+    expect(rover.joints?.length ?? 0).toBeGreaterThan(0);
+    expect(rover.triggers?.length ?? 0).toBeGreaterThan(0);
+  });
+
   it("writes one node per line with kind and id first", () => {
     const scene = preset(4);
-    const lines = formatScene(scene).split("\n").filter((l) => l.startsWith("    {"));
+    const text = formatScene(scene);
+    const block = text.slice(text.indexOf('"nodes": ['), text.indexOf("\n  ]"));
+    const lines = block.split("\n").filter((l) => l.startsWith("    {"));
     expect(lines).toHaveLength(scene.nodes.length);
     for (const line of lines) expect(line).toMatch(/^ {4}\{"kind":"[a-z]+","id":"/);
   });

@@ -10,6 +10,7 @@ import {
 } from "./math.js";
 import type { AnchorFace, GeometryNode, Quat, SceneAST, SceneNode, SnapRule, Vec3 } from "./schema.js";
 import { isGeometryNode } from "./schema.js";
+import { shapeHalfSize } from "./shapes.js";
 
 export class AnchorCycleError extends Error {
   readonly cycle: string[];
@@ -83,6 +84,11 @@ export function localHalfSize(node: GeometryNode): Vec3 {
       const r = Math.max(node.radiusTop, node.radiusBottom);
       return [r, node.height / 2, r];
     }
+    case "capsule":
+    case "torus":
+    case "gltf":
+    case "csg":
+      return shapeHalfSize(node);
   }
 }
 

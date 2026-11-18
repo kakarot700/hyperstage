@@ -19,12 +19,17 @@ Use this skill whenever you author or edit a HyperStage scene (`*.scene.json`, `
 4. **Body kinds:** structural geometry is `static`; only objects that should move are `dynamic`. A dynamic object must start resting on a surface (snap it onto one) unless it is meant to roll from a ramp.
 5. **Playable worlds need** exactly one `spawn` and one `goal`, walkable tops with >= 1.5 m headroom, step-ups <= 0.5 m and gaps <= 2.0 m.
 6. **Every scene needs** a hero `camera` (`isHero: true`) whose target is the subject, and at least one `light` with `castShadow: true`.
+7. **v2 kinds:** `capsule`, `torus`, `gltf` (`url` + `fallbackSize` bounds; nothing is fetched) and `csg` (`operation`: `union` | `subtract` | `intersect`, `base`, `tool`; operands may nest and take local `position` / `rotationDeg`). Carve doorways and windows with `subtract`: the linter, camera and navigator see the real opening.
+8. **Materials:** a preset name (`brushed-metal`, `anodized-dark`, `frosted-glass`, `matte-concrete`, `warm-oak`, `emissive-cyan`, `emissive-amber`, `ceramic-white`) or a custom `{ color, roughness, metalness, ... }` object.
+9. **Mechanisms:** top-level `joints` (`fixed` | `revolute` | `prismatic` | `spherical`) take body-local `anchorA` / `anchorB` that must coincide in the rest pose; `axis` is in bodyA's frame; revolute/prismatic accept `motorVelocity`, `motorMaxForce` and limits. Top-level `triggers` fire once when a dynamic body enters `onEnterNodeId`: `enable_motor`, `unlock_goal` or `impulse`.
+10. **Start from a template:** `hyperstage_get_examples({ category })` returns verified scenes for `game`, `robotics`, `architecture` and `cad`.
 
 ## Finish line (mandatory)
 
 1. Call `hyperstage_compile_and_lint` with the final `sceneJson`.
 2. If `summary.valid` is `false`, apply each `suggestedFix.patch` (or run `hyperstage lint scene.json --fix`) and lint again.
 3. Only report completion when the lint returns `valid: true`. Quote `elapsedMs` and the diagnostic count in your summary.
+4. For CAD or engine hand-off, call `hyperstage_export_cad({ sceneJson, format: "stl" | "glb" })` (or `hyperstage export scene.json -o part.stl`).
 
 ## Minimal example
 

@@ -1,6 +1,6 @@
 {
   "name": "@hyperstage/core",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "HyperStage SceneAST schema, zero-DOM JSX runtime, snapTo resolver, and showcase presets.",
   "license": "MIT",
   "type": "module",

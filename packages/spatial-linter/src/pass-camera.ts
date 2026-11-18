@@ -1,6 +1,6 @@
 import { add, roundVec, scale, sub } from "@hyperstage/core";
 import type { CameraNode, ResolvedGeometry, ResolvedScene, Vec3 } from "@hyperstage/core";
-import { lookBasis, pointAabbDistance, segmentAabb } from "./geometry.js";
+import { lookBasis, meshProxyOf, pointAabbDistance, segmentAabb, segmentMesh } from "./geometry.js";
 import type { SpatialDiagnostic } from "./types.js";
 
 export const CAMERA_GRID = 5;
@@ -60,7 +60,11 @@ export function measureOcclusion(geometry: ResolvedGeometry[], eye: Vec3, target
         if (g.id === subject.id) continue;
         const shrinkMin = add(g.min, [1e-4, 1e-4, 1e-4]);
         const shrinkMax = sub(g.max, [1e-4, 1e-4, 1e-4]);
-        const t = segmentAabb(eye, delta, shrinkMin, shrinkMax);
+        const boxT = segmentAabb(eye, delta, shrinkMin, shrinkMax);
+        // Closed capsule/torus/CSG meshes: refine the AABB hit against the actual triangles,
+        // so a ray through a carved window or doorway is not occluded.
+        const mesh = boxT === null ? null : meshProxyOf(g);
+        const t = mesh === null ? boxT : segmentMesh(eye, delta, mesh);
         if (t !== null && t < 0.999 && t < firstT) {
           firstT = t;
           firstId = g.id;

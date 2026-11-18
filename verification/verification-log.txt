@@ -1,4 +1,4 @@
-HyperStage Studio verification · 2026-11-17T01:33:38.707Z
+HyperStage Studio verification · 2026-11-18T07:54:55.730Z
 vite build …
 vite build ok
 vite preview listening on http://localhost:4173/
@@ -12,8 +12,18 @@ scrub -30 -> 02.50s / 03.00s · 60Hz
 PASS scrubber moves the frame label
 play 1.2s: 00.02s / 03.00s · 60Hz -> 00.22s / 03.00s · 60Hz
 PASS play advances the timeline
+preset2 status: VALID
+PASS preset 2 (Motorized Rover & Drawbridge) lints VALID
 preset3 status: VALID
-PASS preset 3 lints VALID
+PASS preset 3 (Playable Parkour Arena) lints VALID
+preset4 status: VALID
+PASS preset 4 (CSG Villa) lints VALID
+preset5 status: VALID
+PASS preset 5 (Rube Goldberg Marble Cascade) lints VALID
+preset6 status: VALID
+PASS preset 6 (3D-Printable Planetary Gearset) lints VALID
+PASS export-glb downloads a .glb file
+PASS export-stl downloads a .stl file
 console errors (0): []
 page errors (0): []
 failed requests (0): []

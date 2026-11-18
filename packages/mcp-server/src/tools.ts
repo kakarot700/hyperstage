@@ -1,8 +1,10 @@
-import { aabbClearance, bodyKindOf, parseSceneJson, resolveScene, round6 } from "@hyperstage/core";
+import { aabbClearance, bodyKindOf, exportGlb, exportStl, parseSceneJson, resolveScene, round6 } from "@hyperstage/core";
 import type { SceneAST, Vec3 } from "@hyperstage/core";
 import { computeNavigation, findSpawnGoal, lintScene, simulateScene } from "@hyperstage/spatial-linter";
 import type { LintReport, SpatialDiagnostic } from "@hyperstage/spatial-linter";
-import { exportSceneHtml } from "./html-exporter.js";
+import { listExamples } from "./examples.js";
+import type { ExampleCategory, SceneExample } from "./examples.js";
+import { bytesToBase64, exportSceneHtml } from "./html-exporter.js";
 import type { ThreeSources } from "./html-exporter.js";
 
 export interface CompileAndLintResult {
@@ -167,4 +169,59 @@ export async function exportHtml(sceneJson: string, three: ThreeSources, title?:
   const finalTitle = title ?? scene.name;
   const html = exportSceneHtml({ scene, frames: report.frames, navPath: report.navPath, title: finalTitle, three });
   return { title: finalTitle, bytes: new TextEncoder().encode(html).length, frameCount: report.frames.length, html };
+}
+
+export const CAD_FORMATS = ["glb", "stl"] as const;
+export type CadFormat = (typeof CAD_FORMATS)[number];
+
+export const CAD_MIME_TYPES: Readonly<Record<CadFormat, string>> = {
+  glb: "model/gltf-binary",
+  stl: "model/stl",
+};
+
+export interface ExportCadResult {
+  [key: string]: unknown;
+  scene: string;
+  format: CadFormat;
+  mimeType: string;
+  encoding: "base64";
+  /** The binary file, base64-encoded. */
+  data: string;
+  bytes: number;
+  triangles: number;
+  vertices: number;
+  meshes: number;
+  /** Overall extents in millimetres, in the file's axis order (GLB: Y-up; STL: Z-up). */
+  boundsMm: Vec3;
+}
+
+/** Exports every geometry node as a binary glTF 2.0 (.glb, Y-up, metres) or binary STL (Z-up, millimetres). */
+export function exportCad(sceneJson: string, format: CadFormat): ExportCadResult {
+  const scene = parseSceneJson(sceneJson);
+  const result = format === "glb" ? exportGlb(scene) : exportStl(scene);
+  return {
+    scene: scene.name,
+    format,
+    mimeType: CAD_MIME_TYPES[format],
+    encoding: "base64",
+    data: bytesToBase64(result.bytes),
+    bytes: result.bytes.length,
+    triangles: result.stats.triangles,
+    vertices: result.stats.vertices,
+    meshes: result.stats.meshes,
+    boundsMm: result.stats.boundsMm,
+  };
+}
+
+export interface GetExamplesResult {
+  [key: string]: unknown;
+  category: ExampleCategory | null;
+  count: number;
+  examples: SceneExample[];
+}
+
+/** Canonical SceneAST templates: every built-in preset (auto-categorised) plus one hand-written template per category. */
+export function getExamples(category?: ExampleCategory): GetExamplesResult {
+  const examples = listExamples(category);
+  return { category: category ?? null, count: examples.length, examples };
 }

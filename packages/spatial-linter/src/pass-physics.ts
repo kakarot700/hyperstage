@@ -1,8 +1,24 @@
-import { bodyKindOf, distance, orientedHalfExtents, roundVec, tiltDegrees } from "@hyperstage/core";
-import type { Quat, ResolvedGeometry, ResolvedScene, SceneAST, SceneNodeBase, Vec3 } from "@hyperstage/core";
-import { aabbOverlapXZ, contact, shapeOf } from "./geometry.js";
+import {
+  add,
+  bodyKindOf,
+  cross,
+  distance,
+  dot,
+  length,
+  normalize,
+  orientedHalfExtents,
+  quatMultiply,
+  round6,
+  roundVec,
+  rotateVec,
+  scale,
+  sub,
+  tiltDegrees,
+} from "@hyperstage/core";
+import type { GoalNode, JointSpec, Quat, ResolvedGeometry, ResolvedScene, SceneAST, SceneNodeBase, TriggerSpec, Vec3 } from "@hyperstage/core";
+import { aabbOverlapXZ, contact, lintMeshOf, meshProxyOf, pointAabbDistance, shapeOf } from "./geometry.js";
 import type { RapierModule } from "./rapier-loader.js";
-import type { FrameSnapshot, SpatialDiagnostic } from "./types.js";
+import type { FrameSnapshot, JointFrame, SpatialDiagnostic, TriggerEvent } from "./types.js";
 
 export const PHYSICS_DT = 1 / 60;
 export const DEFAULT_TICKS = 180;
@@ -10,6 +26,22 @@ export const VOID_Y = -15;
 export const DRIFT_LIMIT_M = 0.5;
 export const TIP_LIMIT_DEG = 45;
 const CONTACT_TOLERANCE_M = 0.03;
+/** E05 threshold: world-space anchor separation (metres). */
+export const JOINT_SEPARATION_LIMIT_M = 0.15;
+/** A dynamic body within this gap of a trigger volume counts as having entered it. */
+export const TRIGGER_TOLERANCE_M = 0.01;
+/** Velocity-motor gain passed to configureMotorVelocity. */
+export const MOTOR_FACTOR = 10;
+/** Default motor velocity for enable_motor when neither the trigger nor the joint gives one. */
+export const DEFAULT_MOTOR_VELOCITY = 1;
+
+export interface JointStats {
+  /** Separation in the initial (rest) pose, before any step. */
+  initialSeparation: number;
+  maxSeparation: number;
+  /** Tick of the peak separation (0 = initial pose). */
+  maxSeparationTick: number;
+}
 
 export interface RolloutResult {
   frames: FrameSnapshot[];
@@ -18,6 +50,79 @@ export interface RolloutResult {
   /** Peak angular speed (rad/s) per non-static body. */
   peakAngularSpeeds: Record<string, number>;
   finalTransforms: Record<string, { position: Vec3; quaternion: Quat }>;
+  /** v2: per-joint separation statistics over the rollout (tick 0 = rest pose). */
+  jointStats: Record<string, JointStats>;
+  /** v2: trigger firings in tick order. */
+  triggerEvents: TriggerEvent[];
+  /** v2: goals unlocked by unlock_goal triggers. */
+  unlockedGoals: string[];
+  /** v2: body id -> first tick its motion is intended (powered joint motor or impulse). */
+  motionStart: Record<string, number>;
+  /** v2: bodies held by a revolute, prismatic or spherical joint (their tilt is joint-driven). */
+  articulatedBodies: string[];
+}
+
+const conj = (q: Quat): Quat => [-q[0], -q[1], -q[2], q[3]];
+const toVec = (v: Vec3): { x: number; y: number; z: number } => ({ x: v[0], y: v[1], z: v[2] });
+const toRot = (q: Quat): { x: number; y: number; z: number; w: number } => ({ x: q[0], y: q[1], z: q[2], w: q[3] });
+
+/** World-space anchors of a joint for the given body poses. */
+export function worldAnchors(
+  joint: JointSpec,
+  a: { position: Vec3; quaternion: Quat },
+  b: { position: Vec3; quaternion: Quat },
+): { anchorA: Vec3; anchorB: Vec3 } {
+  return {
+    anchorA: add(a.position, rotateVec(a.quaternion, joint.anchorA)),
+    anchorB: add(b.position, rotateVec(b.quaternion, joint.anchorB)),
+  };
+}
+
+/** Joint measurement: separation (prismatic: off-axis only), hinge angle or slide translation. */
+export function measureJoint(
+  joint: JointSpec,
+  a: { position: Vec3; quaternion: Quat },
+  b: { position: Vec3; quaternion: Quat },
+  restRelative: Quat,
+): JointFrame {
+  const { anchorA, anchorB } = worldAnchors(joint, a, b);
+  const gap = sub(anchorB, anchorA);
+  if (joint.type === "prismatic") {
+    const axis = normalize(rotateVec(a.quaternion, joint.axis));
+    const along = dot(gap, axis);
+    return { separation: round6(length(sub(gap, scale(axis, along)))), translation: round6(along) };
+  }
+  const frame: JointFrame = { separation: round6(length(gap)) };
+  if (joint.type === "revolute") {
+    const rel = quatMultiply(conj(a.quaternion), b.quaternion);
+    const d = quatMultiply(rel, conj(restRelative));
+    const axis = normalize(joint.axis);
+    frame.angleRad = round6(2 * Math.atan2(dot([d[0], d[1], d[2]], axis), d[3]));
+  }
+  return frame;
+}
+
+/** Body-local anchorB that makes both world anchors coincide in the rest pose. */
+export function alignedAnchorB(joint: JointSpec, a: ResolvedGeometry, b: ResolvedGeometry): Vec3 {
+  const worldA = add(a.center, rotateVec(a.quaternion, joint.anchorA));
+  return roundVec(rotateVec(conj(b.quaternion), sub(worldA, b.center)));
+}
+
+function triggerVolumeHit(
+  zone: { kind: "goal"; goal: GoalNode } | { kind: "body"; g: ResolvedGeometry; pose: { position: Vec3; quaternion: Quat } },
+  body: ResolvedGeometry,
+  pose: { position: Vec3; quaternion: Quat },
+): boolean {
+  const half = body.node.kind === "sphere" ? body.localHalf : orientedHalfExtents(pose.quaternion, body.localHalf);
+  const min = sub(pose.position, half);
+  const max = add(pose.position, half);
+  if (zone.kind === "goal") return pointAabbDistance(zone.goal.position, min, max) <= zone.goal.radius;
+  const zh = zone.g.node.kind === "sphere" ? zone.g.localHalf : orientedHalfExtents(zone.pose.quaternion, zone.g.localHalf);
+  for (let axis = 0; axis < 3; axis++) {
+    const gap = Math.abs((pose.position[axis] ?? 0) - (zone.pose.position[axis] ?? 0)) - (half[axis] ?? 0) - (zh[axis] ?? 0);
+    if (gap > TRIGGER_TOLERANCE_M) return false;
+  }
+  return true;
 }
 
 function frustumPoints(radiusTop: number, radiusBottom: number, height: number, segments: number): Float32Array {
@@ -32,8 +137,30 @@ function frustumPoints(radiusTop: number, radiusBottom: number, height: number, 
   return points;
 }
 
+/** Local-frame vertices / indices of a mesh-kind node (world mesh moved back into the body frame). */
+function localMeshArrays(g: ResolvedGeometry): { vertices: Float32Array; indices: Uint32Array } {
+  const mesh = lintMeshOf(g);
+  const inverse = conj(g.quaternion);
+  const vertices = new Float32Array(mesh.triangleCount * 9);
+  const indices = new Uint32Array(mesh.triangleCount * 3);
+  for (let i = 0; i < mesh.triangleCount * 3; i++) {
+    const p: Vec3 = [mesh.tris[i * 3] ?? 0, mesh.tris[i * 3 + 1] ?? 0, mesh.tris[i * 3 + 2] ?? 0];
+    const local = rotateVec(inverse, sub(p, g.center));
+    vertices.set(local, i * 3);
+    indices[i] = i;
+  }
+  return { vertices, indices };
+}
+
 function colliderFor(rapier: RapierModule, g: ResolvedGeometry) {
   const node = g.node;
+  if ((node.kind === "torus" || node.kind === "csg") && meshProxyOf(g) !== null) {
+    const { vertices, indices } = localMeshArrays(g);
+    // Static / kinematic: exact triangles (doorways stay open). Dynamic: convex hull.
+    if (bodyKindOf(node) !== "dynamic") return rapier.ColliderDesc.trimesh(vertices, indices);
+    const hull = rapier.ColliderDesc.convexHull(vertices);
+    if (hull !== null) return hull;
+  }
   switch (node.kind) {
     case "sphere":
       return rapier.ColliderDesc.ball(node.radius);
@@ -45,8 +172,13 @@ function colliderFor(rapier: RapierModule, g: ResolvedGeometry) {
         rapier.ColliderDesc.convexHull(frustumPoints(node.radiusTop, node.radiusBottom, node.height, 24)) ??
         rapier.ColliderDesc.cylinder(node.height / 2, Math.max(node.radiusTop, node.radiusBottom))
       );
+    case "capsule":
+      return rapier.ColliderDesc.capsule(Math.max(0, node.height / 2 - node.radius), node.radius);
     case "box":
     case "ramp":
+    case "torus":
+    case "gltf":
+    case "csg":
       return rapier.ColliderDesc.cuboid(g.localHalf[0], g.localHalf[1], g.localHalf[2]);
   }
 }
@@ -55,7 +187,9 @@ function colliderFor(rapier: RapierModule, g: ResolvedGeometry) {
 export function rollout(rapier: RapierModule, scene: SceneAST, resolved: ResolvedScene, ticks: number): RolloutResult {
   const world = new rapier.World({ x: scene.gravity[0], y: scene.gravity[1], z: scene.gravity[2] });
   world.timestep = PHYSICS_DT;
-  const tracked: { id: string; body: ReturnType<typeof world.createRigidBody> }[] = [];
+  type Body = ReturnType<typeof world.createRigidBody>;
+  const tracked: { id: string; body: Body }[] = [];
+  const bodies = new Map<string, Body>();
   try {
     for (const g of resolved.geometry) {
       const kind = bodyKindOf(g.node);
@@ -74,8 +208,96 @@ export function rollout(rapier: RapierModule, scene: SceneAST, resolved: Resolve
       collider.setRestitution(g.node.physics?.restitution ?? 0);
       if (g.node.physics?.mass !== undefined) collider.setMass(g.node.physics.mass);
       world.createCollider(collider, body);
+      bodies.set(g.id, body);
       if (kind !== "static") tracked.push({ id: g.id, body });
     }
+
+    // Joints: RAPIER.JointData with body-local anchors, limits and velocity motors.
+    const joints = scene.joints ?? [];
+    const triggers: TriggerSpec[] = scene.triggers ?? [];
+    const gated = new Set(triggers.filter((t) => t.action === "enable_motor").map((t) => t.targetId));
+    const motionStart: Record<string, number> = {};
+    const markMotion = (id: string, tick: number): void => {
+      const g = resolved.byId.get(id);
+      if (g === undefined || bodyKindOf(g.node) === "static") return;
+      if (motionStart[id] === undefined) motionStart[id] = tick;
+    };
+    const articulated = new Set<string>();
+    const unitJoints = new Map<string, InstanceType<RapierModule["UnitImpulseJoint"]>>();
+    const restRelative = new Map<string, Quat>();
+    const jointStats: Record<string, JointStats> = {};
+    for (const joint of joints) {
+      const ga = resolved.byId.get(joint.bodyA);
+      const gb = resolved.byId.get(joint.bodyB);
+      const ba = bodies.get(joint.bodyA);
+      const bb = bodies.get(joint.bodyB);
+      if (ga === undefined || gb === undefined || ba === undefined || bb === undefined) continue;
+      const rel = quatMultiply(conj(ga.quaternion), gb.quaternion);
+      restRelative.set(joint.id, rel);
+      const anchor1 = toVec(joint.anchorA);
+      const anchor2 = toVec(joint.anchorB);
+      let data: ReturnType<RapierModule["JointData"]["fixed"]>;
+      switch (joint.type) {
+        case "fixed":
+          data = rapier.JointData.fixed(anchor1, { x: 0, y: 0, z: 0, w: 1 }, anchor2, toRot(conj(rel)));
+          break;
+        case "spherical":
+          data = rapier.JointData.spherical(anchor1, anchor2);
+          break;
+        case "revolute": {
+          const axis1 = normalize(joint.axis);
+          const axis2 = normalize(rotateVec(conj(rel), axis1));
+          data = rapier.JointData.revoluteWithAxes(anchor1, anchor2, toVec(axis1), toVec(axis2));
+          if (joint.limitsDeg !== undefined) {
+            data.limitsEnabled = true;
+            data.limits = [(joint.limitsDeg[0] * Math.PI) / 180, (joint.limitsDeg[1] * Math.PI) / 180];
+          }
+          break;
+        }
+        case "prismatic":
+          data = rapier.JointData.prismatic(anchor1, anchor2, toVec(normalize(joint.axis)));
+          if (joint.limits !== undefined) {
+            data.limitsEnabled = true;
+            data.limits = [joint.limits[0], joint.limits[1]];
+          }
+          break;
+      }
+      const created = world.createImpulseJoint(data, ba, bb, true);
+      created.setContactsEnabled(false);
+      if (joint.type !== "fixed") {
+        articulated.add(joint.bodyA);
+        articulated.add(joint.bodyB);
+      }
+      if ((joint.type === "revolute" || joint.type === "prismatic") && created instanceof rapier.UnitImpulseJoint) {
+        unitJoints.set(joint.id, created);
+        // Limits are (re)applied on the live joint: JointData limits are not carried by every constructor.
+        if (joint.type === "revolute" && joint.limitsDeg !== undefined) {
+          created.setLimits((joint.limitsDeg[0] * Math.PI) / 180, (joint.limitsDeg[1] * Math.PI) / 180);
+        } else if (joint.type === "prismatic" && joint.limits !== undefined) {
+          created.setLimits(joint.limits[0], joint.limits[1]);
+        }
+        if (joint.motorMaxForce !== undefined) created.setMotorMaxForce(joint.motorMaxForce);
+        if (joint.motorVelocity !== undefined && !gated.has(joint.id)) {
+          created.configureMotorVelocity(joint.motorVelocity, MOTOR_FACTOR);
+          markMotion(joint.bodyA, 0);
+          markMotion(joint.bodyB, 0);
+        }
+      }
+      const sep = measureJoint(joint, { position: ga.center, quaternion: ga.quaternion }, { position: gb.center, quaternion: gb.quaternion }, rel).separation;
+      jointStats[joint.id] = { initialSeparation: sep, maxSeparation: sep, maxSeparationTick: 0 };
+    }
+    const poseOf = (id: string): { position: Vec3; quaternion: Quat } | null => {
+      const body = bodies.get(id);
+      if (body === undefined) return null;
+      const p = body.translation();
+      const r = body.rotation();
+      return { position: [p.x, p.y, p.z], quaternion: [r.x, r.y, r.z, r.w] };
+    };
+    const goals = new Map<string, GoalNode>();
+    for (const n of scene.nodes) if (n.kind === "goal") goals.set(n.id, n);
+    const fired = new Set<string>();
+    const triggerEvents: TriggerEvent[] = [];
+    const unlockedGoals: string[] = [];
 
     const frames: FrameSnapshot[] = [];
     const peakSpeeds: Record<string, number> = {};
@@ -87,6 +309,71 @@ export function rollout(rapier: RapierModule, scene: SceneAST, resolved: Resolve
     for (let tick = 1; tick <= ticks; tick++) {
       world.step();
       const transforms: FrameSnapshot["transforms"] = {};
+      let jointFrames: Record<string, JointFrame> | undefined;
+      if (joints.length > 0) {
+        jointFrames = {};
+        for (const joint of joints) {
+          const pa = poseOf(joint.bodyA);
+          const pb = poseOf(joint.bodyB);
+          const rel = restRelative.get(joint.id);
+          const stats = jointStats[joint.id];
+          if (pa === null || pb === null || rel === undefined || stats === undefined) continue;
+          const m = measureJoint(joint, pa, pb, rel);
+          jointFrames[joint.id] = m;
+          if (m.separation > stats.maxSeparation) {
+            stats.maxSeparation = m.separation;
+            stats.maxSeparationTick = tick;
+          }
+        }
+      }
+      // Triggers: a dynamic body entering the volume fires each trigger once; effects act from the next step.
+      let firedNow: string[] | undefined;
+      for (const trigger of triggers) {
+        if (fired.has(trigger.id)) continue;
+        const goal = goals.get(trigger.onEnterNodeId);
+        const zoneGeometry = resolved.byId.get(trigger.onEnterNodeId);
+        const zonePose = poseOf(trigger.onEnterNodeId);
+        let entered: string | null = null;
+        for (const t of tracked) {
+          if (t.id === trigger.onEnterNodeId) continue;
+          const g = resolved.byId.get(t.id);
+          const pose = poseOf(t.id);
+          if (g === undefined || pose === null || bodyKindOf(g.node) !== "dynamic") continue;
+          const hit =
+            goal !== undefined
+              ? triggerVolumeHit({ kind: "goal", goal }, g, pose)
+              : zoneGeometry !== undefined && zonePose !== null && triggerVolumeHit({ kind: "body", g: zoneGeometry, pose: zonePose }, g, pose);
+          if (hit) {
+            entered = t.id;
+            break;
+          }
+        }
+        if (entered === null) continue;
+        fired.add(trigger.id);
+        (firedNow ??= []).push(trigger.id);
+        triggerEvents.push({ tick, triggerId: trigger.id, action: trigger.action, targetId: trigger.targetId, bodyId: entered });
+        if (trigger.action === "unlock_goal") {
+          if (!unlockedGoals.includes(trigger.targetId)) unlockedGoals.push(trigger.targetId);
+        } else if (trigger.action === "enable_motor") {
+          const joint = joints.find((j) => j.id === trigger.targetId);
+          const unit = unitJoints.get(trigger.targetId);
+          if (joint !== undefined && unit !== undefined && (joint.type === "revolute" || joint.type === "prismatic")) {
+            const velocity = typeof trigger.value === "number" ? trigger.value : (joint.motorVelocity ?? DEFAULT_MOTOR_VELOCITY);
+            unit.configureMotorVelocity(velocity, MOTOR_FACTOR);
+            bodies.get(joint.bodyA)?.wakeUp();
+            bodies.get(joint.bodyB)?.wakeUp();
+            markMotion(joint.bodyA, tick);
+            markMotion(joint.bodyB, tick);
+          }
+        } else {
+          const impulse: Vec3 = Array.isArray(trigger.value) ? trigger.value : [0, typeof trigger.value === "number" ? trigger.value : 0, 0];
+          const target = bodies.get(trigger.targetId);
+          if (target !== undefined) {
+            target.applyImpulse(toVec(impulse), true);
+            markMotion(trigger.targetId, tick);
+          }
+        }
+      }
       for (const t of tracked) {
         const p = t.body.translation();
         const r = t.body.rotation();
@@ -98,7 +385,10 @@ export function rollout(rapier: RapierModule, scene: SceneAST, resolved: Resolve
         if (speed > (peakSpeeds[t.id] ?? 0)) peakSpeeds[t.id] = speed;
         if (spin > (peakAngularSpeeds[t.id] ?? 0)) peakAngularSpeeds[t.id] = spin;
       }
-      frames.push({ tick, timeSec: Number((tick * PHYSICS_DT).toFixed(6)), transforms });
+      const frame: FrameSnapshot = { tick, timeSec: Number((tick * PHYSICS_DT).toFixed(6)), transforms };
+      if (jointFrames !== undefined) frame.joints = jointFrames;
+      if (firedNow !== undefined) frame.triggers = firedNow;
+      frames.push(frame);
     }
     const last = frames[frames.length - 1];
     const finalTransforms: RolloutResult["finalTransforms"] = {};
@@ -108,7 +398,36 @@ export function rollout(rapier: RapierModule, scene: SceneAST, resolved: Resolve
       if (tr !== undefined) finalTransforms[t.id] = tr;
       else if (g !== undefined) finalTransforms[t.id] = { position: g.center, quaternion: g.quaternion };
     }
-    return { frames, peakSpeeds, peakAngularSpeeds, finalTransforms };
+    // Bodies connected through any joint chain to a driven body move with it from the same tick.
+    let spread = true;
+    while (spread) {
+      spread = false;
+      for (const joint of joints) {
+        const sa = motionStart[joint.bodyA];
+        const sb = motionStart[joint.bodyB];
+        const earliest = Math.min(sa ?? Infinity, sb ?? Infinity);
+        if (!Number.isFinite(earliest)) continue;
+        for (const id of [joint.bodyA, joint.bodyB]) {
+          const g = resolved.byId.get(id);
+          if (g === undefined || bodyKindOf(g.node) !== "dynamic") continue;
+          if ((motionStart[id] ?? Infinity) > earliest) {
+            motionStart[id] = earliest;
+            spread = true;
+          }
+        }
+      }
+    }
+    return {
+      frames,
+      peakSpeeds,
+      peakAngularSpeeds,
+      finalTransforms,
+      jointStats,
+      triggerEvents,
+      unlockedGoals,
+      motionStart,
+      articulatedBodies: [...articulated].sort(),
+    };
   } finally {
     world.free();
   }
@@ -179,8 +498,18 @@ export function passPhysics(resolved: ResolvedScene, rolloutResult: RolloutResul
   const ramps = resolved.geometry.filter((g) => g.node.kind === "ramp");
   const stats = new Map<string, BodyStats>();
   for (const g of dynamic) {
-    stats.set(g.id, { g, minY: g.center[1], maxTilt: 0, driftBeforeTrigger: 0, triggeredAt: null, trigger: null });
+    const start = rolloutResult.motionStart[g.id];
+    // Bodies driven by a joint motor or a trigger impulse are intended to move from that tick on.
+    stats.set(g.id, {
+      g,
+      minY: g.center[1],
+      maxTilt: 0,
+      driftBeforeTrigger: 0,
+      triggeredAt: start === undefined ? null : start,
+      trigger: start === undefined ? null : "motor",
+    });
   }
+  const articulated = new Set(rolloutResult.articulatedBodies);
 
   const transformAt = (frame: FrameSnapshot | null, g: ResolvedGeometry): { position: Vec3; quaternion: Quat } => {
     const tr = frame?.transforms[g.id];
@@ -235,7 +564,7 @@ export function passPhysics(resolved: ResolvedScene, rolloutResult: RolloutResul
     for (const s of stats.values()) {
       const t = transformAt(frame, s.g);
       s.minY = Math.min(s.minY, t.position[1]);
-      if (s.g.node.kind !== "sphere") s.maxTilt = Math.max(s.maxTilt, tiltDegrees(t.quaternion));
+      if (s.g.node.kind !== "sphere" && !articulated.has(s.g.id)) s.maxTilt = Math.max(s.maxTilt, tiltDegrees(t.quaternion));
       if (s.triggeredAt === null) {
         s.driftBeforeTrigger = Math.max(s.driftBeforeTrigger, distance(t.position, s.g.center));
       }
@@ -286,4 +615,44 @@ export function passPhysics(resolved: ResolvedScene, rolloutResult: RolloutResul
     const target = resolved.byId.get(d.nodeId)?.node.snapTo?.target;
     return target === undefined || !flagged.has(target);
   });
+}
+
+/**
+ * Pass 2b (E05_BROKEN_JOINT): flags joints whose world anchors separate by more than
+ * 0.15 m in the rest pose or at any tick of the rollout, and suggests a body-local
+ * anchorB that coincides with anchorA in the rest pose.
+ */
+export function passJoints(scene: SceneAST, resolved: ResolvedScene, rolloutResult: RolloutResult): SpatialDiagnostic[] {
+  const diagnostics: SpatialDiagnostic[] = [];
+  for (const joint of scene.joints ?? []) {
+    const stats = rolloutResult.jointStats[joint.id];
+    const a = resolved.byId.get(joint.bodyA);
+    const b = resolved.byId.get(joint.bodyB);
+    if (stats === undefined || a === undefined || b === undefined) continue;
+    if (stats.maxSeparation <= JOINT_SEPARATION_LIMIT_M) continue;
+    const anchorB = alignedAnchorB(joint, a, b);
+    const atRest = stats.initialSeparation > JOINT_SEPARATION_LIMIT_M;
+    const where = atRest
+      ? `in the rest pose`
+      : `at tick ${stats.maxSeparationTick} of the rollout`;
+    diagnostics.push({
+      code: "E05_BROKEN_JOINT",
+      severity: "error",
+      nodeId: joint.bodyB,
+      relatedNodeId: joint.bodyA,
+      jointId: joint.id,
+      message: `Joint "${joint.id}" (${joint.type}) anchors are ${stats.maxSeparation.toFixed(3)} m apart ${where} (> ${JOINT_SEPARATION_LIMIT_M} m)`,
+      metrics: {
+        initialSeparation: Number(stats.initialSeparation.toFixed(4)),
+        maxSeparation: Number(stats.maxSeparation.toFixed(4)),
+        maxSeparationTick: stats.maxSeparationTick,
+      },
+      suggestedJointFix: {
+        jointId: joint.id,
+        patch: { anchorB },
+        rationale: `Move anchorB of "${joint.id}" to [${anchorB.join(", ")}] in "${joint.bodyB}"'s frame so it coincides with anchorA on "${joint.bodyA}".`,
+      },
+    });
+  }
+  return diagnostics;
 }

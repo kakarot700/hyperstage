@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AnchorCycleError,
   FACE_AXIS,
+  LEGACY_PRESETS,
   PRESETS,
+  getPreset,
   SceneValidationError,
   aabbClearance,
   compileJsx,
@@ -19,8 +21,11 @@ const base: SceneNode = { id: "base", kind: "box", size: [4, 2, 6], position: [1
 
 describe("schema", () => {
   it("accepts every preset", () => {
-    expect(PRESETS).toHaveLength(5);
-    for (const preset of PRESETS) expect(() => parseScene(preset.scene)).not.toThrow();
+    expect(PRESETS).toHaveLength(6);
+    expect(PRESETS.map((p) => p.index)).toEqual([1, 2, 3, 4, 5, 6]);
+    for (const preset of [...PRESETS, ...LEGACY_PRESETS]) expect(() => parseScene(preset.scene)).not.toThrow();
+    expect(getPreset("arch-interior")?.id).toBe("arch-interior");
+    expect(getPreset(6)?.id).toBe("planetary-gearset");
   });
 
   it("rejects duplicate ids, unknown snap targets and malformed vectors", () => {

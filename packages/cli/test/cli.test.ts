@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,54 @@ describe("hyperstage CLI", () => {
     expect(html).toContain("<title>Arena</title>");
     expect(html).toContain('id="hs-data"');
     expect(html.length).toBeGreaterThan(500_000);
+  });
+
+  it("export picks .glb and .stl from the output extension", () => {
+    const glb = cli("export", p("arena.scene.json"), "-o", p("arena.glb"));
+    expect(glb.status).toBe(0);
+    expect(glb.stdout).toContain("glb");
+    const glbBytes = readFileSync(join(work, "arena.glb"));
+    expect(glbBytes.readUInt32LE(0)).toBe(0x46546c67);
+    expect(glbBytes.readUInt32LE(4)).toBe(2);
+    expect(glbBytes.readUInt32LE(8)).toBe(glbBytes.length);
+
+    const stl = cli("export", p("arena.scene.json"), "-o", p("arena.stl"));
+    expect(stl.status).toBe(0);
+    const stlBytes = readFileSync(join(work, "arena.stl"));
+    const triangles = stlBytes.readUInt32LE(80);
+    expect(triangles).toBeGreaterThan(0);
+    expect(stlBytes.length).toBe(84 + 50 * triangles);
+
+    expect(cli("export", p("arena.scene.json"), "-o", p("arena.obj")).status).toBe(2);
+    expect(cli("export", p("arena.scene.json"), "--format", "stl").status).toBe(0);
+    expect(existsSync(join(work, "arena.stl"))).toBe(true);
+  });
+
+  it("lint and export accept a .tsx scene compiled with esbuild", () => {
+    writeFileSync(
+      p("hinge.scene.tsx"),
+      [
+        "const joints = [{ id: \"hinge\", type: \"revolute\" as const, bodyA: \"post\", bodyB: \"door\", anchorA: [0.1, 0, 0] as [number, number, number], anchorB: [-0.8, 0, 0] as [number, number, number], axis: [0, 1, 0] as [number, number, number] }];",
+        "export default (",
+        "  <scene name=\"TSX Hinge\" joints={joints}>",
+        "    <box id=\"ground\" size={[20, 0.5, 20]} position={[0, -0.25, 0]} />",
+        "    <box id=\"post\" size={[0.2, 2, 0.2]} position={[0, 1, 0]} />",
+        "    <box id=\"door\" size={[1, 1.8, 0.1]} position={[0.6, 1, 0]} physics={{ body: \"dynamic\", mass: 5 }} />",
+        "  </scene>",
+        ");",
+        "",
+      ].join("\n"),
+    );
+    const lint = cli("lint", p("hinge.scene.tsx"));
+    expect(lint.status).toBe(1);
+    expect(lint.stdout).toContain("TSX Hinge");
+    expect(lint.stdout).toContain("E05_BROKEN_JOINT");
+    const fix = cli("lint", p("hinge.scene.tsx"), "--fix");
+    expect(fix.status).toBe(0);
+    const fixed = JSON.parse(readFileSync(join(work, "hinge.fixed.json"), "utf8")) as { joints: { anchorB: number[] }[] };
+    expect(fixed.joints[0]?.anchorB).toEqual([-0.5, 0, 0]);
+    const glb = cli("export", p("hinge.scene.tsx"), "-o", p("hinge.glb"));
+    expect(glb.status).toBe(0);
   });
 
   it("skills install populates .hark, .openhands, .claude and .cursor", () => {

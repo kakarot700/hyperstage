@@ -137,22 +137,41 @@ async function main() {
   note(`play 1.2s: ${home} -> ${played}`);
   check(played !== home, "play advances the timeline");
 
-  // Preset 3: parkour arena.
-  await page.getByTestId("preset-3").click();
-  await page.waitForFunction(
-    () => {
-      const editor = document.querySelector('[data-testid="scene-editor"]');
-      const value = editor instanceof HTMLTextAreaElement ? editor.value : (editor?.textContent ?? "");
-      return value.includes("Playable Parkour Arena") && document.querySelector('[data-testid="lint-status"]') !== null;
-    },
-    null,
-    { timeout: 60000 },
-  );
-  await page.waitForFunction(() => document.querySelector('[data-testid="lint-status"]')?.textContent?.trim() === "VALID", null, { timeout: 60000 });
-  await page.waitForTimeout(1800);
-  note(`preset3 status: ${(await status())?.trim()}`);
-  check(((await status())?.trim() ?? "") === "VALID", "preset 3 lints VALID");
-  await page.screenshot({ path: join(OUT, "preset3.png") });
+  // Presets 2-6: each must load, lint VALID and render. Screenshots for the v2 showcase.
+  const showcase = [
+    { index: 2, title: "Motorized Rover & Drawbridge", shot: "preset2-rover.png", scrub: 0.75 },
+    { index: 3, title: "Playable Parkour Arena", shot: "preset3-parkour.png", scrub: null },
+    { index: 4, title: "CSG Villa", shot: "preset4-villa.png", scrub: null },
+    { index: 5, title: "Rube Goldberg Marble Cascade", shot: null, scrub: null },
+    { index: 6, title: "3D-Printable Planetary Gearset", shot: "preset6-gearset.png", scrub: null },
+  ];
+  for (const preset of showcase) {
+    await page.getByTestId(`preset-${preset.index}`).click();
+    await page.waitForFunction(
+      (title) => {
+        const editor = document.querySelector('[data-testid="scene-editor"]');
+        const value = editor instanceof HTMLTextAreaElement ? editor.value : (editor?.textContent ?? "");
+        return value.includes(title) && document.querySelector('[data-testid="lint-status"]') !== null;
+      },
+      preset.title,
+      { timeout: 60000 },
+    );
+    await page.waitForFunction(() => document.querySelector('[data-testid="lint-status"]')?.textContent?.trim() === "VALID", null, { timeout: 60000 });
+    if (preset.scrub !== null) {
+      const box = await page.getByTestId("scrubber").boundingBox();
+      if (box !== null) await page.mouse.click(box.x + box.width * preset.scrub, box.y + box.height / 2);
+    }
+    await page.waitForTimeout(1800);
+    note(`preset${preset.index} status: ${(await status())?.trim()}`);
+    check(((await status())?.trim() ?? "") === "VALID", `preset ${preset.index} (${preset.title}) lints VALID`);
+    if (preset.shot !== null) await page.screenshot({ path: join(OUT, preset.shot) });
+  }
+
+  // v2 exports: the .glb / .stl buttons produce downloads.
+  for (const [testId, ext] of [["export-glb", ".glb"], ["export-stl", ".stl"]]) {
+    const [download] = await Promise.all([page.waitForEvent("download", { timeout: 30000 }), page.getByTestId(testId).click()]);
+    check(download.suggestedFilename().endsWith(ext), `${testId} downloads a ${ext} file`);
+  }
 
   await browser.close();
   browser = null;

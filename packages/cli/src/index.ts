@@ -1,15 +1,20 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Command, InvalidArgumentError } from "commander";
-import { PRESETS, getPreset, parseSceneJson } from "@hyperstage/core";
+import { build } from "esbuild";
+import { PRESETS, compileJsx, exportGlb, exportStl, getPreset, isHyperElement, parseScene, parseSceneJson } from "@hyperstage/core";
+import type { SceneAST } from "@hyperstage/core";
 import { autoFixScene, lintScene, simulateScene } from "@hyperstage/spatial-linter";
 import type { LintReport, SpatialDiagnostic } from "@hyperstage/spatial-linter";
 import { exportSceneHtml } from "@hyperstage/mcp-server/html-exporter";
 import { loadThreeSources } from "@hyperstage/mcp-server/three-sources";
 
-export const VERSION = "1.1.0";
+export const VERSION = "2.0.0";
+export const EXPORT_FORMATS = ["html", "glb", "stl"] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 export const AGENT_TARGETS = ["hark", "openhands", "claude", "cursor"] as const;
 export type AgentTarget = (typeof AGENT_TARGETS)[number];
 
@@ -20,10 +25,63 @@ const err = (text: string): void => {
   process.stderr.write(`${text}\n`);
 };
 
-function readScene(file: string) {
+function readScene(file: string): SceneAST {
   const path = resolve(file);
   if (!existsSync(path)) throw new Error(`Scene file not found: ${path}`);
   return parseSceneJson(readFileSync(path, "utf8"));
+}
+
+const cliDir = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Compiles a `.tsx` / `.jsx` scene module with esbuild (automatic JSX runtime from
+ * `@hyperstage/core`) and evaluates its default export: a `<scene>` element, a
+ * function returning one, or a plain SceneAST object.
+ */
+export async function loadTsxScene(file: string): Promise<SceneAST> {
+  const path = resolve(file);
+  if (!existsSync(path)) throw new Error(`Scene file not found: ${path}`);
+  const result = await build({
+    entryPoints: [path],
+    bundle: true,
+    write: false,
+    format: "esm",
+    platform: "node",
+    target: "es2022",
+    jsx: "automatic",
+    jsxImportSource: "@hyperstage/core",
+    conditions: ["source"],
+    nodePaths: [resolve(cliDir, "..", "node_modules")],
+    logLevel: "silent",
+  });
+  const code = result.outputFiles[0]?.text;
+  if (code === undefined) throw new Error(`esbuild produced no output for ${path}`);
+  const dir = mkdtempSync(join(tmpdir(), "hyperstage-tsx-"));
+  try {
+    const module = join(dir, "scene.mjs");
+    writeFileSync(module, code);
+    const loaded: unknown = await import(pathToFileURL(module).href);
+    const exported = typeof loaded === "object" && loaded !== null && "default" in loaded ? loaded.default : undefined;
+    const value: unknown = typeof exported === "function" ? (exported as () => unknown)() : exported;
+    if (isHyperElement(value)) return compileJsx(value);
+    if (value === undefined) throw new Error(`${path} has no default export (export default <scene>...</scene>)`);
+    return parseScene(value);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Reads a scene from `.json` or compiles it from `.tsx` / `.jsx`. */
+export async function loadScene(file: string): Promise<SceneAST> {
+  const ext = extname(file).toLowerCase();
+  return ext === ".tsx" || ext === ".jsx" ? loadTsxScene(file) : readScene(file);
+}
+
+/** Output format: explicit `--format`, else the `--out` extension, else html. */
+export function resolveExportFormat(format: string | undefined, out: string | undefined): ExportFormat {
+  const candidate = (format ?? (out === undefined ? "html" : extname(out).slice(1))).toLowerCase();
+  if ((EXPORT_FORMATS as readonly string[]).includes(candidate)) return candidate as ExportFormat;
+  throw new Error(`Unsupported export format "${candidate}". Use one of: ${EXPORT_FORMATS.join(", ")} (or an -o path ending in .html, .glb or .stl)`);
 }
 
 function parseIntOption(value: string): number {
@@ -34,7 +92,8 @@ function parseIntOption(value: string): number {
 
 function formatDiagnostic(d: SpatialDiagnostic): string {
   const related = d.relatedNodeId ? ` (vs ${d.relatedNodeId})` : "";
-  const fix = d.suggestedFix ? `\n      fix: ${d.suggestedFix.rationale}` : "";
+  const rationale = d.suggestedFix?.rationale ?? d.suggestedJointFix?.rationale;
+  const fix = rationale === undefined ? "" : `\n      fix: ${rationale}`;
   return `  ${d.severity === "error" ? "✖" : "▲"} ${d.code} ${d.nodeId}${related}\n      ${d.message}${fix}`;
 }
 
@@ -45,6 +104,8 @@ function printReport(name: string, report: LintReport): void {
     `  passes: resolve ${p.resolve.toFixed(2)} | E01 ${p.overlap.toFixed(2)} | E02 ${p.physics.toFixed(2)} | E03 ${p.camera.toFixed(2)} | E04 ${p.navmesh.toFixed(2)} ms`,
   );
   for (const d of report.diagnostics) out(formatDiagnostic(d));
+  for (const note of report.notes ?? []) out(`  note: ${note}`);
+  for (const e of report.triggerEvents ?? []) out(`  trigger ${e.triggerId} fired at tick ${e.tick} (${e.action} -> ${e.targetId}, by ${e.bodyId})`);
   if (report.navPath.length > 0) out(`  navPath: ${report.navPath.length} waypoints`);
 }
 
@@ -113,7 +174,7 @@ export function buildProgram(): Command {
 
   program
     .command("init")
-    .description("Write a starter scene from one of the 5 built-in presets")
+    .description("Write a starter scene from one of the 6 built-in presets")
     .argument("[file]", "output scene file", "hyperstage.scene.json")
     .option("-p, --preset <preset>", `preset index (1-${PRESETS.length}) or id`, "1")
     .option("-f, --force", "overwrite an existing file", false)
@@ -129,16 +190,17 @@ export function buildProgram(): Command {
 
   program
     .command("lint")
-    .description("Run the 4-pass spatial linter (E01-E04)")
-    .argument("<file>", "scene JSON file")
+    .description("Run the spatial linter (E01-E05)")
+    .argument("<file>", "scene file (.json, .tsx or .jsx)")
     .option("--json", "print the full LintReport as JSON (frames omitted unless --frames)", false)
     .option("--frames", "include the 180 physics frames in --json output", false)
     .option("--fix [out]", "apply the auto-fixer (up to 5 passes) and write the repaired scene (default: in place)")
     .action(async (file: string, opts: { json: boolean; frames: boolean; fix?: string | boolean }) => {
-      const scene = readScene(file);
+      const scene = await loadScene(file);
       if (opts.fix !== undefined && opts.fix !== false) {
         const result = await autoFixScene(scene);
-        const target = typeof opts.fix === "string" ? resolve(opts.fix) : resolve(file);
+        const fallback = /\.(tsx|jsx)$/i.test(file) ? file.replace(/(\.scene)?\.(tsx|jsx)$/i, ".fixed.json") : file;
+        const target = typeof opts.fix === "string" ? resolve(opts.fix) : resolve(fallback);
         writeFileSync(target, `${JSON.stringify(result.scene, null, 2)}\n`);
         if (opts.json) {
           out(JSON.stringify({ passes: result.passes, applied: result.applied, report: { ...result.report, frames: opts.frames ? result.report.frames : undefined } }));
@@ -159,11 +221,11 @@ export function buildProgram(): Command {
   program
     .command("sim")
     .description("Run the deterministic Rapier3D rollout")
-    .argument("<file>", "scene JSON file")
+    .argument("<file>", "scene file (.json, .tsx or .jsx)")
     .option("-t, --ticks <ticks>", "ticks at 60 Hz", parseIntOption, 180)
     .option("--json", "print JSON", false)
     .action(async (file: string, opts: { ticks: number; json: boolean }) => {
-      const scene = readScene(file);
+      const scene = await loadScene(file);
       const sim = await simulateScene(scene, opts.ticks);
       if (opts.json) {
         out(JSON.stringify({ ticks: sim.ticks, elapsedMs: sim.elapsedMs, finalTransforms: sim.finalTransforms, peakSpeeds: sim.peakSpeeds }));
@@ -177,18 +239,30 @@ export function buildProgram(): Command {
 
   program
     .command("export")
-    .description("Export a self-contained HTML player (three.js + baked physics + WASD walk mode)")
-    .argument("<file>", "scene JSON file")
-    .option("-o, --out <out>", "output .html file")
-    .option("--title <title>", "document title")
-    .action(async (file: string, opts: { out?: string; title?: string }) => {
-      const scene = readScene(file);
-      const report = await lintScene(scene);
-      const html = exportSceneHtml({ scene, frames: report.frames, navPath: report.navPath, title: opts.title ?? scene.name, three: loadThreeSources() });
-      const target = resolve(opts.out ?? file.replace(/(\.scene)?\.json$/i, "") + ".html");
+    .description("Export a scene: interactive standalone .html player, binary glTF 2.0 .glb, or watertight binary .stl")
+    .argument("<file>", "scene file (.json, .tsx or .jsx)")
+    .option("-o, --out <out>", "output file; its extension (.html, .glb, .stl) picks the format")
+    .option("--format <format>", `one of ${EXPORT_FORMATS.join(", ")} (overrides the --out extension)`)
+    .option("--title <title>", "HTML document title")
+    .action(async (file: string, opts: { out?: string; format?: string; title?: string }) => {
+      const format = resolveExportFormat(opts.format, opts.out);
+      const scene = await loadScene(file);
+      const base = file.replace(/(\.scene)?\.(json|tsx|jsx)$/i, "");
+      const target = resolve(opts.out ?? `${base}.${format}`);
       mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, html);
-      out(`✔ exported ${target} (${(html.length / 1024).toFixed(0)} KiB, ${report.frames.length} frames${report.valid ? "" : `, ${report.diagnostics.length} lint diagnostic(s)`})`);
+      if (format === "html") {
+        const report = await lintScene(scene);
+        const html = exportSceneHtml({ scene, frames: report.frames, navPath: report.navPath, title: opts.title ?? scene.name, three: loadThreeSources() });
+        writeFileSync(target, html);
+        out(`✔ exported ${target} (${(html.length / 1024).toFixed(0)} KiB, ${report.frames.length} frames${report.valid ? "" : `, ${report.diagnostics.length} lint diagnostic(s)`})`);
+        return;
+      }
+      const result = format === "glb" ? exportGlb(scene) : exportStl(scene);
+      writeFileSync(target, result.bytes);
+      const [x, y, z] = result.stats.boundsMm;
+      out(
+        `✔ exported ${target} (${format}, ${result.bytes.length} bytes, ${result.stats.meshes} mesh(es), ${result.stats.triangles} triangles, ${x.toFixed(1)} x ${y.toFixed(1)} x ${z.toFixed(1)} mm)`,
+      );
     });
 
   const skills = program.command("skills").description("Agent skill packs");

@@ -6,7 +6,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
-import { bodyKindOf } from "@hyperstage/core";
+import { bodyKindOf, buildShapeMesh, resolveMaterial } from "@hyperstage/core";
 import type { GeometryNode, GoalNode, LightNode, ResolvedScene, SceneAST, SceneNode, SpawnNode, Vec3 } from "@hyperstage/core";
 import type { LintReport } from "@hyperstage/spatial-linter";
 import { cameraPose, easeInOutCubic, focusDistance } from "../lib/cameraRig";
@@ -80,7 +80,7 @@ function easeOutBack(t: number): number {
 }
 
 function isGeometryNode(node: SceneNode): node is GeometryNode {
-  return node.kind === "box" || node.kind === "sphere" || node.kind === "cylinder" || node.kind === "ramp";
+  return node.kind !== "camera" && node.kind !== "light" && node.kind !== "spawn" && node.kind !== "goal";
 }
 
 function geometryFor(node: GeometryNode): THREE.BufferGeometry {
@@ -92,6 +92,17 @@ function geometryFor(node: GeometryNode): THREE.BufferGeometry {
     case "box":
     case "ramp":
       return new THREE.BoxGeometry(node.size[0], node.size[1], node.size[2]);
+    case "capsule":
+    case "torus":
+    case "gltf":
+    case "csg": {
+      const mesh = buildShapeMesh(node, { segments: 40 });
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(mesh.positions, 3));
+      geometry.setAttribute("normal", new THREE.BufferAttribute(mesh.normals, 3));
+      geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+      return geometry;
+    }
   }
 }
 
@@ -472,12 +483,15 @@ class StageController {
     if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.color.copy(sky);
     for (const g of resolved.geometry) {
       const node = g.node;
+      const pbr = resolveMaterial(node.material);
       const material = new THREE.MeshStandardMaterial({
-        color: node.material?.color ?? "#8a8f98",
-        metalness: node.material?.metalness ?? 0.1,
-        roughness: node.material?.roughness ?? 0.8,
-        transparent: (node.material?.opacity ?? 1) < 1,
-        opacity: node.material?.opacity ?? 1,
+        color: pbr.color,
+        metalness: pbr.metalness,
+        roughness: pbr.roughness,
+        transparent: pbr.transparent,
+        opacity: pbr.opacity,
+        emissive: pbr.emissive,
+        emissiveIntensity: pbr.emissiveIntensity,
       });
       const mesh = new THREE.Mesh(geometryFor(node), material);
       mesh.name = g.id;
